@@ -12,6 +12,24 @@ import "./app.css";
 import { AuthProvider } from "./contexts/AuthContext";
 import { AppShell } from "./components/layout/AppShell";
 
+const themeScript = String.raw`
+;(function() {
+  try {
+    var storageKey = "sudoku-theme";
+    var storedTheme = window.localStorage.getItem(storageKey);
+    var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var theme = storedTheme || (prefersDark ? "dark" : "light");
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  } catch (error) {
+    // no-op
+  }
+})();
+`;
+
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
   {
@@ -31,6 +49,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: themeScript,
+          }}
+        />
         <Meta />
         <Links />
       </head>
