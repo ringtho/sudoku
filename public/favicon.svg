@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="gradient" x1="12%" y1="0%" x2="88%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+    <linearGradient id="shadow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="rgba(0,0,0,0.18)"/>
+      <stop offset="100%" stop-color="rgba(0,0,0,0)"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="18" fill="url(#gradient)"/>
+  <rect x="4" y="4" width="56" height="56" rx="18" fill="url(#shadow)"/>
+  <text
+    x="50%"
+    y="55%"
+    text-anchor="middle"
+    font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    font-size="34"
+    font-weight="700"
+    fill="#fafafa"
+    letter-spacing="0.02em"
+  >
+    S
+  </text>
+  <g opacity="0.35" fill="#ffffff">
+    <rect x="18" y="20" width="2" height="8" rx="1"/>
+    <rect x="30" y="20" width="2" height="8" rx="1"/>
+    <rect x="42" y="20" width="2" height="8" rx="1"/>
+    <rect x="18" y="36" width="2" height="8" rx="1"/>
+    <rect x="30" y="36" width="2" height="8" rx="1"/>
+    <rect x="42" y="36" width="2" height="8" rx="1"/>
+    <rect x="16" y="30" width="8" height="2" rx="1"/>
+    <rect x="28" y="30" width="8" height="2" rx="1"/>
+    <rect x="40" y="30" width="8" height="2" rx="1"/>
+    <rect x="16" y="46" width="8" height="2" rx="1"/>
+    <rect x="28" y="46" width="8" height="2" rx="1"/>
+    <rect x="40" y="46" width="8" height="2" rx="1"/>
+  </g>
+</svg>

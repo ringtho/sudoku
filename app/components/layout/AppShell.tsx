@@ -104,10 +104,19 @@ export function AppShell({ children }: AppShellProps) {
       <main className="flex-1">
         <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">{children}</div>
       </main>
-      <footer className="border-t border-gray-200 bg-white/60 py-6 text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-950/60 dark:text-gray-400">
-        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+ <footer className="border-t border-gray-200 bg-white/60 py-6 text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-950/60 dark:text-gray-400">
+        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 text-center sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:text-left lg:px-8">
           <p>Built with love &amp; logic. Invite a friend and solve together.</p>
-          <p className="font-medium">© {new Date().getFullYear()} Sudoku Together</p>
+          <div className="flex flex-col items-center gap-1 text-xs sm:flex-row sm:gap-3 sm:text-sm">
+            <span className="font-medium">© {new Date().getFullYear()} Sudoku Together</span>
+            <span className="hidden text-gray-300 sm:block dark:text-gray-700">•</span>
+            <a
+              href="mailto:sringtho@gmail.com"
+              className="font-medium text-gray-600 transition hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-400"
+            >
+              Designed by Smith Ringtho
+            </a>
+          </div>
         </div>
       </footer>
     </div>
