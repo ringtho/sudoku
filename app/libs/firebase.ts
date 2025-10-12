@@ -11,7 +11,9 @@ import {
 import {
   getFirestore,
   type Firestore,
-  enableIndexedDbPersistence,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
 } from "firebase/firestore";
 
 type FirebaseServices = {
@@ -42,14 +44,25 @@ export function getFirebase(): FirebaseServices {
 
   const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
   const auth = getAuth(app);
-  const db = getFirestore(app);
-  const googleProvider = new GoogleAuthProvider();
+  let db: Firestore;
 
-  if (import.meta.env.PROD && typeof window !== "undefined") {
-    enableIndexedDbPersistence(db).catch(() => {
-      // Persistence is optional; ignore failures such as multiple tabs or SSR environments.
-    });
+  if (typeof window !== "undefined") {
+    try {
+      db = initializeFirestore(
+        app,
+        {
+          cache: persistentLocalCache({
+            tabManager: persistentMultipleTabManager(),
+          }),
+        } as Record<string, unknown>,
+      );
+    } catch (error) {
+      db = getFirestore(app);
+    }
+  } else {
+    db = getFirestore(app);
   }
+  const googleProvider = new GoogleAuthProvider();
 
   services = { app, auth, db, googleProvider };
   return services;
