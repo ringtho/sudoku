@@ -1,0 +1,39 @@
+# ==============================
+# Netlify configuration for Sudoku Together
+# ==============================
+
+[build]
+  # The command Netlify runs to build your app
+  command = "npm run build"
+
+  # The folder that Netlify will publish to the web
+  publish = "build/client"
+
+  # The environment variables to adjust Netlify's secrets scanning behavior
+  [build.environment]
+    # Tell Netlify to ignore these public Firebase variables during the secrets scan
+    SECRETS_SCAN_OMIT_KEYS = "VITE_FIREBASE_API_KEY,VITE_FIREBASE_APP_ID,VITE_FIREBASE_AUTH_DOMAIN,VITE_FIREBASE_MEASUREMENT_ID,VITE_FIREBASE_MESSAGING_SENDER_ID,VITE_FIREBASE_PROJECT_ID,VITE_FIREBASE_STORAGE_BUCKET"
+
+    # Optional: specify Node version explicitly to match your local setup
+    NODE_VERSION = "22"
+
+# ==============================
+# Redirects & SPA support
+# ==============================
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# ==============================
+# Optional: Firebase keys reference (for clarity only)
+# ==============================
+# These should still be defined in Netlify’s UI under “Site Settings → Environment Variables”
+# VITE_FIREBASE_API_KEY
+# VITE_FIREBASE_APP_ID
+# VITE_FIREBASE_AUTH_DOMAIN
+# VITE_FIREBASE_MEASUREMENT_ID
+# VITE_FIREBASE_MESSAGING_SENDER_ID
+# VITE_FIREBASE_PROJECT_ID
+# VITE_FIREBASE_STORAGE_BUCKET
