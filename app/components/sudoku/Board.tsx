@@ -63,7 +63,7 @@ export const SudokuBoardView = memo(function SudokuBoardView({
           const isRowColHighlighted =
             selectedRow !== null && selectedCol !== null && (row === selectedRow || col === selectedCol);
           const isSameValueHighlighted =
-            highlightValue !== null && highlightValue === value && value !== null && !isGivenCell(givenMap, index);
+            highlightValue !== null && highlightValue === value && value !== null;
           const isConflict = conflicts.has(index);
           const locked = Boolean(lockedCells[index]);
           const presence = showPresenceBadges ? presenceByCell.get(index) : undefined;

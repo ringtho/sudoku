@@ -1,3 +1,4 @@
+import clsx from "clsx";
 import { Button } from "../ui/button";
 import type { SudokuMode } from "../../hooks/useSudokuGame";
 
@@ -9,6 +10,8 @@ type NumberPadProps = {
   numbersLeft: Record<number, number>;
   setMode: (mode: SudokuMode) => void;
   hintsLeft?: number;
+  onHighlightDigit?: (digit: number | null) => void;
+  activeDigit?: number | null;
 };
 
 export function NumberPad({
@@ -19,6 +22,8 @@ export function NumberPad({
   numbersLeft,
   setMode,
   hintsLeft,
+  onHighlightDigit,
+  activeDigit,
 }: NumberPadProps) {
   return (
     <div className="space-y-4 rounded-3xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
@@ -27,8 +32,16 @@ export function NumberPad({
           <Button
             key={digit}
             variant="outline"
-            className="flex h-12 w-full flex-col items-center justify-center rounded-2xl border border-gray-300 text-base font-semibold dark:border-gray-700"
-            onClick={() => onInput(digit)}
+            className={clsx(
+              "flex h-12 w-full flex-col items-center justify-center rounded-2xl border border-gray-300 text-base font-semibold transition-colors dark:border-gray-700",
+              activeDigit === digit
+                ? "border-blue-400 bg-blue-500/10 text-blue-600 shadow-sm dark:border-blue-500/60 dark:bg-blue-500/10 dark:text-blue-300"
+                : undefined,
+            )}
+            onClick={() => {
+              onHighlightDigit?.(digit);
+              onInput(digit);
+            }}
           >
             {digit}
             <span className="text-[10px] font-normal text-gray-500 dark:text-gray-400">
@@ -54,7 +67,13 @@ export function NumberPad({
         </Button>
       </div>
       <div className="flex flex-col gap-2 sm:flex-row">
-        <Button variant="outline" onClick={onClear}>
+        <Button
+          variant="outline"
+          onClick={() => {
+            onClear();
+            onHighlightDigit?.(null);
+          }}
+        >
           Clear
         </Button>
         {onHint ? (

@@ -94,6 +94,7 @@ export function useSudokuGame({
   const [notes, setNotes] = useState<NotesRecord>(() => normalizeNotes(initialState?.notes));
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [mode, setMode] = useState<SudokuMode>("value");
+  const [highlightDigit, setHighlightDigitState] = useState<number | null>(null);
 
   const boardRef = useRef(board);
   const notesRef = useRef(notes);
@@ -135,13 +136,26 @@ export function useSudokuGame({
     (index: number | null) => {
       if (index === null) {
         setSelectedIndex(null);
+        setHighlightDigitState(null);
         return;
       }
       if (index < 0 || index >= BOARD_SIZE) return;
       setSelectedIndex(index);
+      const cellValue = boardRef.current[index];
+      if (cellValue !== null) {
+        setHighlightDigitState(cellValue);
+      }
     },
-    [setSelectedIndex],
+    [setSelectedIndex, setHighlightDigitState],
   );
+
+  useEffect(() => {
+    if (selectedIndex === null) return;
+    const cellValue = board[selectedIndex];
+    if (cellValue !== null) {
+      setHighlightDigitState((previous) => (previous === cellValue ? previous : cellValue));
+    }
+  }, [board, selectedIndex, setHighlightDigitState]);
 
   const clearCell = useCallback(() => {
     if (selectedIndex === null) return;
@@ -155,8 +169,9 @@ export function useSudokuGame({
     const nextNotes = { ...notesRef.current };
     delete nextNotes[selectedIndex];
     applyState(nextBoard, nextNotes);
+    setHighlightDigitState(null);
     onMove?.({ index: selectedIndex, previousValue, nextValue: null });
-  }, [applyState, givenMap, onMove, selectedIndex]);
+  }, [applyState, givenMap, onMove, selectedIndex, setHighlightDigitState]);
 
   const enterValue = useCallback(
     (value: number) => {
@@ -167,7 +182,7 @@ export function useSudokuGame({
       const previousValue = boardRef.current[selectedIndex] ?? null;
       if (previousValue === value) return;
 
-       if (guardrailsEnabled) {
+      if (guardrailsEnabled) {
         const expected = solutionBoard[selectedIndex];
         if (expected !== value) {
           return;
@@ -178,10 +193,38 @@ export function useSudokuGame({
       nextBoard[selectedIndex] = value;
       const nextNotes = { ...notesRef.current };
       delete nextNotes[selectedIndex];
+      const { row, column } = indexToRowColumn(selectedIndex);
+      const affectedIndices = new Set<number>();
+      const rowStart = row * ROW_SIZE;
+      for (let offset = 0; offset < ROW_SIZE; offset++) {
+        affectedIndices.add(rowStart + offset);
+      }
+      for (let r = 0; r < ROW_SIZE; r++) {
+        affectedIndices.add(column + r * ROW_SIZE);
+      }
+      const boxRowStart = Math.floor(row / 3) * 3;
+      const boxColStart = Math.floor(column / 3) * 3;
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 3; c++) {
+          affectedIndices.add((boxRowStart + r) * ROW_SIZE + (boxColStart + c));
+        }
+      }
+      affectedIndices.delete(selectedIndex);
+      for (const index of affectedIndices) {
+        const notes = nextNotes[index];
+        if (!notes) continue;
+        const filtered = notes.filter((note) => note !== value);
+        if (filtered.length === 0) {
+          delete nextNotes[index];
+        } else if (filtered.length !== notes.length) {
+          nextNotes[index] = filtered;
+        }
+      }
       applyState(nextBoard, nextNotes);
+      setHighlightDigitState(value);
       onMove?.({ index: selectedIndex, previousValue, nextValue: value });
     },
-    [applyState, givenMap, guardrailsEnabled, onMove, selectedIndex, solutionBoard],
+    [applyState, givenMap, guardrailsEnabled, onMove, selectedIndex, setHighlightDigitState, solutionBoard],
   );
 
   const toggleNote = useCallback(
@@ -204,8 +247,9 @@ export function useSudokuGame({
         nextNotes[selectedIndex] = entries;
       }
       applyState(boardRef.current.slice(), nextNotes);
+      setHighlightDigitState(value);
     },
-    [applyState, givenMap, selectedIndex],
+    [applyState, givenMap, selectedIndex, setHighlightDigitState],
   );
 
   const requestHint = useCallback(() => {
@@ -223,9 +267,10 @@ export function useSudokuGame({
     const nextNotes = { ...notesRef.current };
     delete nextNotes[selectedIndex];
     applyState(nextBoard, nextNotes);
+    setHighlightDigitState(hintValue);
     onMove?.({ index: selectedIndex, previousValue, nextValue: hintValue });
     return hintValue;
-  }, [applyState, givenMap, onMove, selectedIndex, solutionBoard]);
+  }, [applyState, givenMap, onMove, selectedIndex, setHighlightDigitState, solutionBoard]);
 
   const applyRemoteState = useCallback(
     (state: SudokuSerializedState) => {
@@ -239,10 +284,23 @@ export function useSudokuGame({
   const resetGame = useCallback(() => {
     applyState(puzzleBoard.slice(), {});
     setSelectedIndex(null);
+    setHighlightDigitState(null);
     setMode("value");
-  }, [applyState, puzzleBoard]);
+  }, [applyState, puzzleBoard, setHighlightDigitState]);
 
-  const highlightValue = selectedIndex !== null ? board[selectedIndex] : null;
+  const setHighlightDigit = useCallback(
+    (digit: number | null) => {
+      if (digit === null) {
+        setHighlightDigitState(null);
+        return;
+      }
+      if (!Number.isInteger(digit) || digit < 1 || digit > 9) return;
+      setHighlightDigitState(digit);
+    },
+    [setHighlightDigitState],
+  );
+
+  const highlightValue = highlightDigit;
   const conflicts = useMemo(() => findConflicts(board), [board]);
   const numbersLeft = useMemo(() => computeNumbersLeft(board), [board]);
   const isComplete = useMemo(() => isBoardComplete(board), [board]);
@@ -263,6 +321,7 @@ export function useSudokuGame({
       toggleNote,
       clearCell,
       setMode,
+      setHighlightDigit,
       requestHint,
       applyRemoteState,
       resetGame,

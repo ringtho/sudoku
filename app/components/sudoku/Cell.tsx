@@ -52,10 +52,14 @@ export function SudokuCell({
       className={clsx(
         "relative flex aspect-square w-full select-none items-center justify-center border text-lg font-medium transition-colors",
         "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500",
-        "border-slate-200/80 bg-white text-slate-700 dark:border-slate-700/70 dark:bg-slate-950 dark:text-slate-200",
+        "border-slate-200/80 bg-white text-slate-700 transition-colors dark:border-slate-700/70 dark:bg-slate-950 dark:text-slate-200",
         isGiven ? "text-slate-900 dark:text-slate-100" : null,
-        isRowColHighlighted && !isSelected ? "bg-slate-100 dark:bg-slate-800" : null,
-        isSameValueHighlighted && !isSelected ? "bg-amber-100/70 dark:bg-amber-500/20" : null,
+        isRowColHighlighted && !isSelected && !isSameValueHighlighted ? "bg-slate-100 dark:bg-slate-800" : null,
+        isSameValueHighlighted
+          ? isSelected
+            ? "border-amber-400 bg-amber-200/70 text-amber-900 ring-2 ring-amber-300 shadow-sm dark:border-amber-400/80 dark:bg-amber-400/25 dark:text-amber-50 dark:ring-amber-400/80"
+            : "border-amber-300 bg-gradient-to-br from-amber-50/90 via-amber-100/50 to-amber-50/90 text-amber-800 shadow-[inset_0_0_0_1.5px_rgba(245,158,11,0.45)] dark:border-amber-400/70 dark:from-amber-500/15 dark:via-amber-500/5 dark:to-amber-400/20 dark:text-amber-100"
+          : null,
         isConflict ? "bg-rose-50 text-rose-600 ring-1 ring-rose-300 dark:bg-rose-500/20 dark:text-rose-100" : null,
         isSelected
           ? "z-10 ring-2 ring-slate-400 shadow-sm dark:ring-slate-300"

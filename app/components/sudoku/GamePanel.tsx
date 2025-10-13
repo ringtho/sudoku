@@ -52,6 +52,7 @@ export function SudokuGamePanel({
       if (/^[1-9]$/.test(event.key)) {
         event.preventDefault();
         const value = Number.parseInt(event.key, 10);
+        actions.setHighlightDigit(value);
         if (mode === "note") {
           actions.toggleNote(value);
         } else {
@@ -130,6 +131,8 @@ export function SudokuGamePanel({
           numbersLeft={numbersLeft}
           setMode={actions.setMode}
           hintsLeft={allowHints ? hintsLeft : undefined}
+          onHighlightDigit={actions.setHighlightDigit}
+          activeDigit={highlightValue}
         />
         <div className="rounded-3xl border border-gray-200 bg-white p-4 text-sm shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <h3 className="text-base font-semibold text-gray-700 dark:text-gray-200">Game status</h3>

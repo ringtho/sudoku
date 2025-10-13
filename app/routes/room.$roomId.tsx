@@ -110,6 +110,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   const [hintsRemaining, setHintsRemaining] = useState(3);
   const [showMobileChat, setShowMobileChat] = useState(false);
   const [showMobileTimeline, setShowMobileTimeline] = useState(false);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [rematchStatus, setRematchStatus] = useState<"idle" | "starting" | "error">("idle");
   const { preferences } = usePreferences();
   const pendingState = useRef<SudokuSerializedState | null>(null);
@@ -124,6 +125,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   const hasActivated = useRef(room.status !== "waiting");
   const statusRef = useRef<RoomStatus>(room.status);
   const streakRef = useRef(0);
+  const bestStreakRef = useRef(0);
   const totalCorrectRef = useRef(0);
   const idleTimerRef = useRef<number | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
@@ -132,6 +134,12 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   const sharedCellNotificationRef = useRef<Map<number, number>>(new Map());
   const startTimeRef = useRef<number>(Date.now());
   const completedDurationRef = useRef<number | null>(null);
+  const [matchSummary, setMatchSummary] = useState<{
+    durationMs: number | null;
+    correctMoves: number;
+    bestStreak: number;
+    hintsUsed: number | null;
+  } | null>(null);
 
   const handleStatePersist = useCallback(
     (state: SudokuSerializedState) => {
@@ -196,6 +204,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
         hasActivated.current = true;
         startTimeRef.current = Date.now();
         streakRef.current = 0;
+        bestStreakRef.current = 0;
         totalCorrectRef.current = 0;
         if (statusRef.current !== "active") {
           statusRef.current = "active";
@@ -224,6 +233,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
           if (!wasHint) {
             streakRef.current += 1;
             totalCorrectRef.current += 1;
+            bestStreakRef.current = Math.max(bestStreakRef.current, streakRef.current);
             if ([3, 5, 10].includes(streakRef.current)) {
               const { row, column } = indexToRowColumn(index);
               sendRoomSystemEvent(roomId, {
@@ -317,6 +327,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
         actorUid: currentUser.uid,
         actorName: currentUser.displayName ?? currentUser.email ?? "Player",
       });
+      setUnreadChatCount(0);
     },
     [currentUser, roomId],
   );
@@ -391,6 +402,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       setHintsRemaining(3);
       hasCelebrated.current = false;
       streakRef.current = 0;
+      bestStreakRef.current = 0;
       totalCorrectRef.current = 0;
       startTimeRef.current = Date.now();
       completedDurationRef.current = null;
@@ -398,6 +410,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       idleNotifiedRef.current = false;
       statusRef.current = "waiting";
       hasActivated.current = false;
+      setMatchSummary(null);
     } catch (error) {
       console.error("Failed to start rematch", error);
       setRematchStatus("error");
@@ -413,6 +426,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     lastMoveWasCorrect.current = false;
     statusRef.current = room.status;
     streakRef.current = 0;
+    bestStreakRef.current = 0;
     totalCorrectRef.current = 0;
     lastActivityRef.current = Date.now();
     idleNotifiedRef.current = false;
@@ -420,6 +434,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     sharedCellNotificationRef.current.clear();
     startTimeRef.current = Date.now();
     completedDurationRef.current = null;
+    setMatchSummary(null);
   }, [roomId, room.status]);
 
   useEffect(() => {
@@ -448,6 +463,12 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       if (!completedDurationRef.current) {
         completedDurationRef.current = Date.now() - startTimeRef.current;
       }
+      setMatchSummary({
+        durationMs: completedDurationRef.current,
+        correctMoves: totalCorrectRef.current,
+        bestStreak: bestStreakRef.current,
+        hintsUsed: preferences.allowHints ? Math.max(0, 3 - hintsRemaining) : null,
+      });
       setShowConfetti(true);
       celebrationTimeout.current = window.setTimeout(() => {
         setShowConfetti(false);
@@ -614,12 +635,12 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
         </div>
       </div>
 
-      {game.isComplete ? (
+      {matchSummary ? (
         <MatchSummary
-          durationMs={completedDurationRef.current}
-          correctMoves={totalCorrectRef.current}
-          bestStreak={streakRef.current}
-          hintsUsed={preferences.allowHints ? Math.max(0, 3 - hintsRemaining) : null}
+          durationMs={matchSummary.durationMs}
+          correctMoves={matchSummary.correctMoves}
+          bestStreak={matchSummary.bestStreak}
+          hintsUsed={matchSummary.hintsUsed}
           onRematch={handleRematch}
           rematchStatus={rematchStatus}
         />
@@ -627,15 +648,15 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
 
       {showMobileChat ? (
         <MobileSheet title="Room chat" onClose={() => setShowMobileChat(false)}>
-        <RoomChat
-          events={events}
-          members={members}
-          currentUserId={currentUserId}
-          onSend={handleSendMessage}
-          onTypingChange={handleTypingChange}
-          showTypingIndicators={preferences.showPresenceBadges}
-          className="max-h-[70vh]"
-        />
+          <RoomChat
+            events={events}
+            members={members}
+            currentUserId={currentUserId}
+            onSend={handleSendMessage}
+            onTypingChange={handleTypingChange}
+            showTypingIndicators={preferences.showPresenceBadges}
+            className="max-h-[70vh]"
+          />
         </MobileSheet>
       ) : null}
 
@@ -645,16 +666,22 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
         </MobileSheet>
       ) : null}
 
-      {!showMobileChat ? (
-        <button
-          type="button"
-          onClick={() => setShowMobileChat(true)}
-          className="fixed bottom-5 right-5 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 lg:hidden"
-          aria-label="Open chat"
-        >
-          <MessageCircle className="h-6 w-6" aria-hidden="true" />
-        </button>
-      ) : null}
+      <button
+        type="button"
+        onClick={() => {
+          setShowMobileChat(true);
+          setUnreadChatCount(0);
+        }}
+        className="fixed bottom-5 right-5 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 lg:hidden"
+        aria-label="Open chat"
+      >
+        <MessageCircle className="h-6 w-6" aria-hidden="true" />
+        {unreadChatCount > 0 ? (
+          <span className="absolute -top-1 -right-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-500 px-1 text-[11px] font-semibold text-white">
+            {unreadChatCount > 99 ? "99+" : unreadChatCount}
+          </span>
+        ) : null}
+      </button>
     </div>
   );
 }
