@@ -1,9 +1,17 @@
 import { useEffect, useState } from "react";
-import { listenToRoom, listenToRoomMembers, type RoomDocument, type RoomMember } from "../libs/rooms";
+import {
+  listenToRoom,
+  listenToRoomMembers,
+  listenToRoomEvents,
+  type RoomDocument,
+  type RoomMember,
+  type RoomEvent,
+} from "../libs/rooms";
 
 export function useRoomRealtime(roomId: string) {
   const [room, setRoom] = useState<RoomDocument | null>(null);
   const [members, setMembers] = useState<RoomMember[]>([]);
+  const [events, setEvents] = useState<RoomEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -15,11 +23,15 @@ export function useRoomRealtime(roomId: string) {
     const unsubscribeMembers = listenToRoomMembers(roomId, (nextMembers) => {
       setMembers(nextMembers);
     });
+    const unsubscribeEvents = listenToRoomEvents(roomId, (nextEvents) => {
+      setEvents(nextEvents);
+    }, { limitTo: 120 });
     return () => {
       unsubscribeRoom();
       unsubscribeMembers();
+      unsubscribeEvents();
     };
   }, [roomId]);
 
-  return { room, members, loading } as const;
+  return { room, members, events, loading } as const;
 }

@@ -190,6 +190,61 @@ export async function updatePresence(
   );
 }
 
+export type RoomEvent =
+  | {
+      id: string;
+      type: "chat";
+      text: string;
+      createdAt: Timestamp | null;
+      actorUid: string;
+      actorName: string;
+    }
+  | {
+      id: string;
+      type: "system";
+      text: string;
+      createdAt: Timestamp | null;
+    };
+
+function eventsCollection(db: Firestore, roomId: string) {
+  return collection(roomDoc(db, roomId), "events");
+}
+
+export function listenToRoomEvents(
+  roomId: string,
+  callback: (events: RoomEvent[]) => void,
+  options: { limitTo?: number } = {},
+): Unsubscribe {
+  const { db } = getFirebase();
+  const constraints: QueryConstraint[] = [orderBy("createdAt", "desc")];
+  if (options.limitTo) {
+    constraints.push(limit(options.limitTo));
+  }
+  const eventsQuery = query(eventsCollection(db, roomId), ...constraints);
+  return onSnapshot(eventsQuery, (snapshot) => {
+    const nextEvents = snapshot.docs.map((docSnap) => {
+      const data = docSnap.data();
+      const typedData = {
+        id: docSnap.id,
+        ...data,
+      } as RoomEvent;
+      return typedData;
+    });
+    callback(nextEvents.reverse());
+  });
+}
+
+export async function sendRoomMessage(roomId: string, data: { text: string; actorUid: string; actorName: string }) {
+  const { db } = getFirebase();
+  await addDoc(eventsCollection(db, roomId), {
+    type: "chat",
+    text: data.text,
+    actorUid: data.actorUid,
+    actorName: data.actorName,
+    createdAt: serverTimestamp(),
+  });
+}
+
 function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
   const data = snapshot.data() as Omit<RoomDocument, "id"> | undefined;
   if (!data) {

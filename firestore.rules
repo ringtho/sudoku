@@ -25,6 +25,12 @@ service cloud.firestore {
         allow read: if isSignedIn();
         allow write: if isSignedIn() && request.auth.uid == memberId;
       }
+
+      match /events/{eventId} {
+        allow read: if isSignedIn() && isMember(roomId);
+        allow create: if isSignedIn() && isMember(roomId);
+        allow update, delete: if false;
+      }
     }
   }
 }

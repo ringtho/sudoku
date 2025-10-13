@@ -17,11 +17,14 @@ import { useRoomRealtime } from "../hooks/useRoomRealtime";
 import {
   updateRoomState,
   updatePresence,
+  sendRoomMessage,
   type RoomDocument,
   type RoomMember,
+  type RoomEvent,
 } from "../libs/rooms";
 import { boardToString } from "../libs/sudoku";
 import type { User } from "firebase/auth";
+import { RoomChat } from "../components/chat/RoomChat";
 
 export function meta({ params }: Route.MetaArgs) {
   return [
@@ -52,7 +55,7 @@ export default function Room() {
 
 function RoomLoader({ roomId }: { roomId: string }) {
   const auth = useAuth();
-  const { room, members, loading } = useRoomRealtime(roomId);
+  const { room, members, events, loading } = useRoomRealtime(roomId);
 
   if (loading) {
     return (
@@ -74,18 +77,25 @@ function RoomLoader({ roomId }: { roomId: string }) {
   const currentUser = auth.status === "authenticated" ? auth.user : null;
 
   return (
-    <RoomContent room={room} members={members} roomId={roomId} currentUser={currentUser} />
+    <RoomContent
+      room={room}
+      members={members}
+      events={events}
+      roomId={roomId}
+      currentUser={currentUser}
+    />
   );
 }
 
 type RoomContentProps = {
   room: RoomDocument;
   members: RoomMember[];
+  events: RoomEvent[];
   roomId: string;
   currentUser: User | null;
 };
 
-function RoomContent({ room, members, roomId, currentUser }: RoomContentProps) {
+function RoomContent({ room, members, events, roomId, currentUser }: RoomContentProps) {
   const [copied, setCopied] = useState(false);
   const pendingState = useRef<SudokuSerializedState | null>(null);
   const debounceHandle = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -164,6 +174,8 @@ function RoomContent({ room, members, roomId, currentUser }: RoomContentProps) {
     cellIndex: member.cursorIndex,
   }));
 
+  const currentUserId = currentUser?.uid ?? null;
+
   const roomShareUrl =
     typeof window !== "undefined" ? window.location.href : `https://sudoku.local/room/${roomId}`;
 
@@ -183,6 +195,18 @@ function RoomContent({ room, members, roomId, currentUser }: RoomContentProps) {
       setTimeout(() => setCopied(false), 2000);
     }
   }, [roomId, roomShareUrl]);
+
+  const handleSendMessage = useCallback(
+    async (text: string) => {
+      if (!currentUser) return;
+      await sendRoomMessage(roomId, {
+        text,
+        actorUid: currentUser.uid,
+        actorName: currentUser.displayName ?? currentUser.email ?? "Player",
+      });
+    },
+    [currentUser, roomId],
+  );
 
   return (
     <div className="space-y-10">
@@ -208,13 +232,22 @@ function RoomContent({ room, members, roomId, currentUser }: RoomContentProps) {
         </div>
       </header>
 
-      <SudokuGamePanel game={game} peers={peers} />
-
-      <section className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <h2 className="text-lg font-semibold">Game timeline</h2>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          Chat, move history, and celebratory effects will appear here once real-time sync is connected.
-        </p>
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+        <div className="space-y-6">
+          <SudokuGamePanel game={game} peers={peers} />
+          <div className="rounded-3xl border border-gray-200 bg-white p-6 text-sm shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <h2 className="text-base font-semibold text-gray-700 dark:text-gray-100">Match timeline</h2>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+              Coming soon: move history, streaks, and confetti-worthy wins.
+            </p>
+          </div>
+        </div>
+        <RoomChat
+          events={events}
+          members={members}
+          currentUserId={currentUserId}
+          onSend={handleSendMessage}
+        />
       </section>
     </div>
   );
