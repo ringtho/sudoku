@@ -1,6 +1,6 @@
 import type * as React from "react";
 import type { Route } from "./+types/rooms.new";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { RequireAuth } from "../components/layout/RequireAuth";
 import { Button } from "../components/ui/button";
@@ -22,6 +22,9 @@ export default function CreateRoom() {
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [status, setStatus] = useState<"idle" | "creating" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [roomInfo, setRoomInfo] = useState<{ id: string; link: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [selectedColor, setSelectedColor] = useState<string>(hostColors[0]);
 
   const currentUser = auth.status === "authenticated" ? auth.user : null;
 
@@ -36,14 +39,31 @@ export default function CreateRoom() {
         difficulty,
         ownerUid: currentUser.uid,
         ownerName: currentUser.displayName ?? currentUser.email ?? "Player",
+        ownerColor: selectedColor,
       });
-      navigate(`/room/${roomId}`);
+      const link = typeof window !== "undefined" ? `${window.location.origin}/room/${roomId}` : `/room/${roomId}`;
+      setRoomInfo({ id: roomId, link });
+      setStatus("idle");
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        navigator.clipboard
+          .writeText(link)
+          .then(() => setCopied(true))
+          .catch(() => setCopied(false));
+      }
     } catch (err) {
       console.error(err);
       setStatus("error");
       setError("We couldn\'t create the room. Please try again.");
     }
   };
+
+  const shareLink = useMemo(() => {
+    if (!roomInfo) return "";
+    if (typeof window !== "undefined") {
+      return `${window.location.origin}/room/${roomInfo.id}`;
+    }
+    return roomInfo.link;
+  }, [roomInfo]);
 
   return (
     <RequireAuth>
@@ -102,6 +122,26 @@ export default function CreateRoom() {
             </div>
           </div>
 
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Color vibe</p>
+            <div className="flex flex-wrap gap-3">
+              {hostColors.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  onClick={() => setSelectedColor(color)}
+                  className={`relative flex h-10 w-10 items-center justify-center rounded-full transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
+                    selectedColor === color ? "ring-2 ring-blue-500" : "ring-1 ring-transparent"
+                  }`}
+                  style={{ background: color }}
+                  aria-label={`Select color ${color}`}
+                >
+                  {selectedColor === color ? <span className="text-white">✓</span> : null}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {error ? (
             <p className="text-sm text-red-500">{error}</p>
           ) : null}
@@ -115,6 +155,16 @@ export default function CreateRoom() {
             </Button>
           </div>
         </form>
+
+        {roomInfo ? (
+          <InviteOverlay
+            roomLink={shareLink}
+            copied={copied}
+            setCopied={setCopied}
+            difficulty={difficultyOptions.find((opt) => opt.value === difficulty)}
+            onClose={() => navigate(`/room/${roomInfo.id}`)}
+          />
+        ) : null}
       </div>
     </RequireAuth>
   );
@@ -126,3 +176,65 @@ const difficultyOptions: { value: Difficulty; label: string; description: string
   { value: "hard", label: "Hard", description: "Requires teamwork and smart note-taking." },
   { value: "expert", label: "Expert", description: "Brutal grids for puzzle purists." },
 ];
+
+const hostColors = ["#6366f1", "#ec4899", "#22d3ee", "#34d399", "#f97316", "#a855f7"];
+
+type InviteOverlayProps = {
+  roomLink: string;
+  copied: boolean;
+  setCopied: (value: boolean) => void;
+  difficulty?: { value: Difficulty; label: string; description: string };
+  onClose: () => void;
+};
+
+function InviteOverlay({ roomLink, copied, setCopied, difficulty, onClose }: InviteOverlayProps) {
+  const handleCopy = () => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard
+        .writeText(roomLink)
+        .then(() => setCopied(true))
+        .catch(() => setCopied(false));
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-lg space-y-6 rounded-3xl border border-white/20 bg-white/90 p-8 shadow-2xl backdrop-blur dark:border-slate-700/60 dark:bg-slate-900/95">
+        <header className="space-y-2 text-center">
+          <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Room ready to share</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            We copied the invite link for you. Send it to your teammate and jump in together.
+          </p>
+        </header>
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex items-center justify-between">
+            <span className="font-medium text-gray-700 dark:text-gray-200">Difficulty</span>
+            <span className="rounded-full bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-600 dark:text-blue-300">
+              {difficulty?.label ?? "Custom"}
+            </span>
+          </div>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{difficulty?.description}</p>
+        </div>
+        <div className="space-y-3">
+          <label className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            Invite link
+          </label>
+          <div className="flex items-center gap-2 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <span className="block flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-gray-700 dark:text-gray-200">
+              {roomLink}
+            </span>
+            <Button variant="outline" size="sm" onClick={handleCopy}>
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </div>
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+          <Button variant="ghost" onClick={handleCopy}>
+            Copy again
+          </Button>
+          <Button onClick={onClose}>Enter room</Button>
+        </div>
+      </div>
+    </div>
+  );
+}

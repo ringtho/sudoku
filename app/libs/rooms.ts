@@ -26,6 +26,8 @@ export type RoomDocument = {
   id: string;
   name: string;
   ownerUid: string;
+  ownerName: string;
+  ownerColor?: string;
   difficulty: Difficulty;
   status: RoomStatus;
   createdAt: Timestamp | null;
@@ -42,6 +44,7 @@ export type RoomMember = {
   color: string;
   cursorIndex: number | null;
   lastActive: Timestamp | null;
+  isTyping?: boolean;
 };
 
 export type CreateRoomInput = {
@@ -49,6 +52,7 @@ export type CreateRoomInput = {
   difficulty: Difficulty;
   ownerUid: string;
   ownerName: string;
+  ownerColor?: string;
 };
 
 const ROOM_COLORS = [
@@ -84,13 +88,15 @@ function membersCollection(db: Firestore, roomId: string) {
   return collection(roomDoc(db, roomId), "members");
 }
 
-export async function createRoom({ name, difficulty, ownerUid, ownerName }: CreateRoomInput) {
+export async function createRoom({ name, difficulty, ownerUid, ownerName, ownerColor }: CreateRoomInput) {
   const { db } = getFirebase();
   const { puzzle, solution } = generateSudoku(difficulty, `${ownerUid}-${Date.now()}`);
 
   const roomRef = await addDoc(roomsCollection(db), {
     name,
     ownerUid,
+    ownerName,
+    ownerColor: ownerColor ?? assignColor(ownerUid),
     difficulty,
     status: "waiting" satisfies RoomStatus,
     createdAt: serverTimestamp(),
@@ -104,9 +110,10 @@ export async function createRoom({ name, difficulty, ownerUid, ownerName }: Crea
   const memberRef = doc(membersCollection(db, roomRef.id), ownerUid);
   await setDoc(memberRef, {
     displayName: ownerName,
-    color: assignColor(ownerUid),
+    color: ownerColor ?? assignColor(ownerUid),
     cursorIndex: null,
     lastActive: serverTimestamp(),
+    isTyping: false,
   });
 
   return roomRef.id;
@@ -183,6 +190,9 @@ export async function updatePresence(
   if (data.displayName !== undefined) {
     payload.displayName = data.displayName;
   }
+  if (data.isTyping !== undefined) {
+    payload.isTyping = data.isTyping;
+  }
   await setDoc(
     memberRef,
     payload,
@@ -204,6 +214,19 @@ export type RoomEvent =
       type: "system";
       text: string;
       createdAt: Timestamp | null;
+      level?: "info" | "success" | "warning";
+      actorUid?: string;
+      actorName?: string;
+    }
+  | {
+      id: string;
+      type: "move";
+      cellIndex: number;
+      value: number | null;
+      correct: boolean;
+      actorUid: string;
+      actorName: string;
+      createdAt: Timestamp | null;
     };
 
 function eventsCollection(db: Firestore, roomId: string) {
@@ -224,11 +247,7 @@ export function listenToRoomEvents(
   return onSnapshot(eventsQuery, (snapshot) => {
     const nextEvents = snapshot.docs.map((docSnap) => {
       const data = docSnap.data();
-      const typedData = {
-        id: docSnap.id,
-        ...data,
-      } as RoomEvent;
-      return typedData;
+      return { id: docSnap.id, ...(data as Omit<RoomEvent, "id">) } as RoomEvent;
     });
     callback(nextEvents.reverse());
   });
@@ -245,6 +264,75 @@ export async function sendRoomMessage(roomId: string, data: { text: string; acto
   });
 }
 
+export async function sendRoomMove(
+  roomId: string,
+  data: { cellIndex: number; value: number | null; correct: boolean; actorUid: string; actorName: string },
+) {
+  const { db } = getFirebase();
+  await addDoc(eventsCollection(db, roomId), {
+    type: "move",
+    cellIndex: data.cellIndex,
+    value: data.value,
+    correct: data.correct,
+    actorUid: data.actorUid,
+    actorName: data.actorName,
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function sendRoomSystemEvent(
+  roomId: string,
+  data: { text: string; level?: "info" | "success" | "warning"; actorUid?: string; actorName?: string },
+) {
+  const { db } = getFirebase();
+  await addDoc(eventsCollection(db, roomId), {
+    type: "system",
+    text: data.text,
+    level: data.level ?? "info",
+    actorUid: data.actorUid ?? null,
+    actorName: data.actorName ?? null,
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function updateRoomStatus(roomId: string, status: RoomStatus) {
+  const { db } = getFirebase();
+  const docRef = roomDoc(db, roomId);
+  await updateDoc(docRef, {
+    status,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function startRoomRematch(
+  roomId: string,
+  difficulty: Difficulty,
+  actorUid: string,
+  actorName: string,
+) {
+  const { db } = getFirebase();
+  const { puzzle, solution } = generateSudoku(difficulty, `${roomId}-${Date.now()}`);
+
+  const docRef = roomDoc(db, roomId);
+  await updateDoc(docRef, {
+    puzzle,
+    solution,
+    board: puzzle,
+    notes: {},
+    status: "waiting" satisfies RoomStatus,
+    updatedAt: serverTimestamp(),
+  });
+
+  await addDoc(eventsCollection(db, roomId), {
+    type: "system",
+    text: `${actorName} started a rematch! Fresh puzzle ready.`,
+    level: "info",
+    actorUid,
+    actorName,
+    createdAt: serverTimestamp(),
+  });
+}
+
 function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
   const data = snapshot.data() as Omit<RoomDocument, "id"> | undefined;
   if (!data) {
@@ -252,6 +340,7 @@ function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
       id: snapshot.id,
       name: "Untitled",
       ownerUid: "",
+      ownerName: "",
       difficulty: "medium",
       status: "waiting",
       createdAt: null,
@@ -259,11 +348,14 @@ function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
       puzzle: "".padEnd(81, "."),
       solution: "".padEnd(81, "1"),
       board: "".padEnd(81, "."),
+      ownerColor: undefined,
       notes: {},
     } satisfies RoomDocument;
   }
   return {
     id: snapshot.id,
     ...data,
-  };
+    ownerName: data.ownerName ?? "",
+    ownerColor: data.ownerColor,
+  } satisfies RoomDocument;
 }

@@ -8,6 +8,7 @@ type NumberPadProps = {
   mode: SudokuMode;
   numbersLeft: Record<number, number>;
   setMode: (mode: SudokuMode) => void;
+  hintsLeft?: number;
 };
 
 export function NumberPad({
@@ -17,6 +18,7 @@ export function NumberPad({
   mode,
   numbersLeft,
   setMode,
+  hintsLeft,
 }: NumberPadProps) {
   return (
     <div className="space-y-4 rounded-3xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
@@ -55,9 +57,15 @@ export function NumberPad({
         <Button variant="outline" onClick={onClear}>
           Clear
         </Button>
-        <Button variant="outline" onClick={onHint} disabled={!onHint}>
-          Hint (coming soon)
-        </Button>
+        {onHint ? (
+          <Button
+            variant="outline"
+            onClick={onHint}
+            disabled={!onHint || (typeof hintsLeft === "number" && hintsLeft <= 0)}
+          >
+            Hint{typeof hintsLeft === "number" ? ` (${Math.max(hintsLeft, 0)})` : ""}
+          </Button>
+        ) : null}
       </div>
     </div>
   );

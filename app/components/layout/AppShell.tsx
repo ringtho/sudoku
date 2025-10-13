@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
-import { NavLink } from "react-router";
-import { LogIn, LogOut, Moon, Sun } from "lucide-react";
+import { NavLink, useLocation, useNavigate } from "react-router";
+import { LogIn, LogOut, Moon, Sun, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Avatar } from "../ui/avatar";
 import { useTheme } from "../../hooks/useTheme";
 import { useAuth } from "../../contexts/AuthContext";
+import { usePreferences } from "../../contexts/PreferencesContext";
 import clsx from "clsx";
+import { useState } from "react";
 
 type AppShellProps = {
   children: ReactNode;
@@ -17,9 +19,15 @@ const navItems = [
   { to: "/about", label: "About", requiresAuth: false },
 ];
 
+const highlightOptions = ["#6366f1", "#ec4899", "#22d3ee", "#34d399", "#f97316", "#a855f7"] as const;
+
 export function AppShell({ children }: AppShellProps) {
   const { theme, toggleTheme } = useTheme();
   const auth = useAuth();
+  const { preferences, updatePreferences } = usePreferences();
+  const [showPreferences, setShowPreferences] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50 text-gray-900 transition-colors dark:bg-gray-950 dark:text-gray-50">
@@ -48,6 +56,13 @@ export function AppShell({ children }: AppShellProps) {
                   {item.label}
                 </NavLink>
               ))}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowPreferences(true)}
+            >
+              Preferences
+            </Button>
           </nav>
           <div className="flex items-center gap-3">
             <Button
@@ -62,6 +77,15 @@ export function AppShell({ children }: AppShellProps) {
               ) : (
                 <Moon className="h-5 w-5" aria-hidden="true" />
               )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Open preferences"
+              className="hidden h-9 w-9 rounded-full p-0 sm:inline-flex"
+              onClick={() => setShowPreferences(true)}
+            >
+              <SlidersHorizontal className="h-5 w-5" aria-hidden="true" />
             </Button>
             {auth.status === "authenticated" && (
               <div className="hidden items-center gap-3 md:flex">
@@ -93,18 +117,30 @@ export function AppShell({ children }: AppShellProps) {
                 variant="primary"
                 size="sm"
                 icon={<LogIn className="h-4 w-4" aria-hidden="true" />}
-                onClick={() => auth.signInWithGoogle()}
+                onClick={() =>
+                  navigate("/login", {
+                    state: { redirectTo: location.pathname + location.search },
+                  })
+                }
               >
                 Sign in
               </Button>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="sm:hidden"
+              onClick={() => setShowPreferences(true)}
+            >
+              Preferences
+            </Button>
           </div>
         </div>
       </header>
       <main className="flex-1">
         <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">{children}</div>
       </main>
- <footer className="border-t border-gray-200 bg-white/60 py-6 text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-950/60 dark:text-gray-400">
+      <footer className="relative z-40 border-t border-gray-200 bg-white/60 py-6 text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-950/60 dark:text-gray-400">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 text-center sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:text-left lg:px-8">
           <p>Built with love &amp; logic. Invite a friend and solve together.</p>
           <div className="flex flex-col items-center gap-1 text-xs sm:flex-row sm:gap-3 sm:text-sm">
@@ -119,6 +155,108 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </div>
       </footer>
+      {showPreferences ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-10">
+          <div className="w-full max-w-lg space-y-6 rounded-3xl border border-white/20 bg-white/95 p-6 shadow-2xl backdrop-blur dark:border-slate-700/60 dark:bg-slate-900/95">
+            <header className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Preferences</h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Personalize how Sudoku Together feels.</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setShowPreferences(false)}>
+                <X className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </header>
+
+            <section className="space-y-3">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Highlight color</h3>
+              <div className="flex flex-wrap gap-3">
+                {highlightOptions.map((color: string) => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => updatePreferences({ highlightColor: color })}
+                    className={clsx(
+                      "relative flex h-10 w-10 items-center justify-center rounded-full border-2 transition",
+                      preferences.highlightColor === color
+                        ? "border-blue-500"
+                        : "border-transparent hover:border-blue-300",
+                    )}
+                    style={{ background: color }}
+                    aria-label={`Select highlight color ${color}`}
+                  >
+                    {preferences.highlightColor === color ? <span className="text-white">✓</span> : null}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="space-y-3">
+              <PreferenceToggle
+                label="Show presence badges"
+                description="Display collaborator initials and cursor focus on the board."
+                value={preferences.showPresenceBadges}
+                onToggle={(value) => updatePreferences({ showPresenceBadges: value })}
+              />
+              <PreferenceToggle
+                label="Allow hints"
+                description="Show the hint button and track remaining uses."
+                value={preferences.allowHints}
+                onToggle={(value) => updatePreferences({ allowHints: value })}
+              />
+              <PreferenceToggle
+                label="Guardrails"
+                description="Block incorrect entries so only valid moves stick."
+                value={preferences.guardrailsEnabled}
+                onToggle={(value) => updatePreferences({ guardrailsEnabled: value })}
+              />
+            </section>
+
+            <footer className="flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => setShowPreferences(false)}>
+                Close
+              </Button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+type PreferenceToggleProps = {
+  label: string;
+  description: string;
+  value: boolean;
+  onToggle: (value: boolean) => void;
+};
+
+function PreferenceToggle({ label, description, value, onToggle }: PreferenceToggleProps) {
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(!value)}
+      className={clsx(
+        "w-full rounded-2xl border px-4 py-3 text-left transition",
+        value
+          ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:border-blue-400 dark:bg-blue-500/10 dark:text-blue-200"
+          : "border-gray-200 hover:border-blue-300 dark:border-slate-700 dark:hover:border-blue-400",
+      )}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-semibold">{label}</span>
+        <span
+          className={clsx(
+            "rounded-full px-2 py-0.5 text-xs font-semibold",
+            value
+              ? "bg-blue-500 text-white dark:bg-blue-400 dark:text-slate-900"
+              : "bg-gray-200 text-gray-600 dark:bg-slate-800 dark:text-gray-300",
+          )}
+        >
+          {value ? "On" : "Off"}
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{description}</p>
+    </button>
   );
 }

@@ -11,6 +11,7 @@ import type { Route } from "./+types/root";
 import "./app.css";
 import { AuthProvider } from "./contexts/AuthContext";
 import { AppShell } from "./components/layout/AppShell";
+import { PreferencesProvider } from "./contexts/PreferencesContext";
 
 const themeScript = String.raw`
 ;(function() {
@@ -71,9 +72,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <AuthProvider>
-      <AppShell>
-        <Outlet />
-      </AppShell>
+      <PreferencesProvider>
+        <AppShell>
+          <Outlet />
+        </AppShell>
+      </PreferencesProvider>
     </AuthProvider>
   );
 }

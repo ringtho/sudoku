@@ -55,6 +55,13 @@ firebase deploy --only firestore:rules,firestore:indexes
 
 The repo ships with opinionated rules in `firestore.rules` that restrict writes to authenticated room members.
 
+#### Required composite index
+
+Firestore needs a composite index for the lobby query (`ownerUid` + `updatedAt`). The deploy command above will create it automatically from `firestore.indexes.json`. If you prefer the console, add an index for collection `rooms` with fields:
+
+- `ownerUid` – Ascending
+- `updatedAt` – Descending
+
 ### 4. Run the app
 
 ```bash

@@ -8,9 +8,23 @@ type SudokuGamePanelProps = {
   game: SudokuGame;
   peers?: CollaboratorPresence[];
   lockedCells?: Record<number, { name: string; color: string }>;
+  onHint?: () => void;
+  hintsLeft?: number;
+  highlightColor?: string;
+  showPresenceBadges?: boolean;
+  allowHints?: boolean;
 };
 
-export function SudokuGamePanel({ game, peers, lockedCells }: SudokuGamePanelProps) {
+export function SudokuGamePanel({
+  game,
+  peers,
+  lockedCells,
+  onHint,
+  hintsLeft,
+  highlightColor,
+  showPresenceBadges = true,
+  allowHints = true,
+}: SudokuGamePanelProps) {
   const {
     board,
     notes,
@@ -90,6 +104,8 @@ export function SudokuGamePanel({ game, peers, lockedCells }: SudokuGamePanelPro
           lockedCells={lockedCells}
           onSelectCell={actions.selectCell}
           peers={peers}
+          highlightColor={highlightColor}
+          showPresenceBadges={showPresenceBadges}
         />
         <div className="text-center text-sm text-gray-600 dark:text-gray-400">
           {isComplete ? (
@@ -109,9 +125,11 @@ export function SudokuGamePanel({ game, peers, lockedCells }: SudokuGamePanelPro
         <NumberPad
           onInput={(value) => (mode === "note" ? actions.toggleNote(value) : actions.enterValue(value))}
           onClear={actions.clearCell}
+          onHint={allowHints ? onHint : undefined}
           mode={mode}
           numbersLeft={numbersLeft}
           setMode={actions.setMode}
+          hintsLeft={allowHints ? hintsLeft : undefined}
         />
         <div className="rounded-3xl border border-gray-200 bg-white p-4 text-sm shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <h3 className="text-base font-semibold text-gray-700 dark:text-gray-200">Game status</h3>
@@ -133,6 +151,12 @@ export function SudokuGamePanel({ game, peers, lockedCells }: SudokuGamePanelPro
               <dt>Mode</dt>
               <dd className="font-medium">{mode === "note" ? "Note" : "Value"}</dd>
             </div>
+            {typeof hintsLeft === "number" ? (
+              <div className="flex items-center justify-between">
+                <dt>Hints left</dt>
+                <dd className="font-medium">{hintsLeft}</dd>
+              </div>
+            ) : null}
           </dl>
           <Button variant="ghost" className="mt-4 w-full justify-center" onClick={actions.resetGame}>
             Reset puzzle

@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import type { MouseEventHandler } from "react";
+import type { CSSProperties, MouseEventHandler } from "react";
 
 type PresenceIndicator = {
   id: string;
@@ -19,6 +19,8 @@ type SudokuCellProps = {
   presence?: PresenceIndicator[];
   onClick?: MouseEventHandler<HTMLButtonElement>;
   className?: string;
+  style?: CSSProperties;
+  selectionColor?: string;
 };
 
 export function SudokuCell({
@@ -33,6 +35,8 @@ export function SudokuCell({
   presence,
   onClick,
   className,
+  style,
+  selectionColor,
 }: SudokuCellProps) {
   const showNotes = value === null && notes.length > 0;
   const ariaLabel = value
@@ -61,6 +65,14 @@ export function SudokuCell({
       )}
       onClick={onClick}
       disabled={isLocked}
+      style={(() => {
+        const inlineStyle: CSSProperties = { ...style };
+        if (isSelected) {
+          inlineStyle.boxShadow = `0 0 0 2px ${selectionColor ?? "#6366f1"}`;
+          inlineStyle.zIndex = 5;
+        }
+        return inlineStyle;
+      })()}
     >
       {value !== null ? (
         <span className={clsx("text-2xl leading-none", isGiven ? "font-semibold" : "font-medium")}>

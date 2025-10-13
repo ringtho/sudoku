@@ -22,6 +22,8 @@ type SudokuBoardProps = {
   onSelectCell: (index: number) => void;
   peers?: CollaboratorPresence[];
   lockedCells?: Record<number, { name: string; color: string }>;
+  highlightColor?: string;
+  showPresenceBadges?: boolean;
 };
 
 export const SudokuBoardView = memo(function SudokuBoardView({
@@ -34,6 +36,8 @@ export const SudokuBoardView = memo(function SudokuBoardView({
   onSelectCell,
   peers,
   lockedCells = {},
+  highlightColor,
+  showPresenceBadges = true,
 }: SudokuBoardProps) {
   const presenceByCell = useMemo(() => {
     const map = new Map<number, CollaboratorPresence[]>();
@@ -62,27 +66,47 @@ export const SudokuBoardView = memo(function SudokuBoardView({
             highlightValue !== null && highlightValue === value && value !== null && !isGivenCell(givenMap, index);
           const isConflict = conflicts.has(index);
           const locked = Boolean(lockedCells[index]);
-          const presence = presenceByCell.get(index);
+          const presence = showPresenceBadges ? presenceByCell.get(index) : undefined;
+          const presenceColor = presence && presence.length ? presence[0].color : undefined;
           const isShaded = (Math.floor(row / 3) + Math.floor(col / 3)) % 2 === 0;
 
           return (
-            <SudokuCell
-              key={index}
-              value={value}
-              notes={notes[index] ?? []}
-              isGiven={isGivenCell(givenMap, index)}
-              isSelected={isSelected}
-              isRowColHighlighted={isRowColHighlighted}
-              isSameValueHighlighted={isSameValueHighlighted}
-              isConflict={isConflict}
-              isLocked={locked}
-              presence={presence}
-              onClick={() => onSelectCell(index)}
-              className={clsx(
-                "border-0",
-                isShaded ? "bg-slate-50 dark:bg-slate-900" : "bg-white dark:bg-slate-950",
-              )}
-            />
+            <div key={index} className="relative">
+              <SudokuCell
+                value={value}
+                notes={notes[index] ?? []}
+                isGiven={isGivenCell(givenMap, index)}
+                isSelected={isSelected}
+                isRowColHighlighted={isRowColHighlighted}
+                isSameValueHighlighted={isSameValueHighlighted}
+                isConflict={isConflict}
+                isLocked={locked}
+                presence={presence}
+                onClick={() => onSelectCell(index)}
+                className={clsx(
+                  "border-0",
+                  isShaded ? "bg-slate-50 dark:bg-slate-900" : "bg-white dark:bg-slate-950",
+                )}
+                selectionColor={highlightColor}
+                style={presenceColor && !isSelected ? { boxShadow: `0 0 0 2px ${presenceColor}` } : undefined}
+              />
+              {presence && presence.length ? (
+                <div className="pointer-events-none absolute -top-6 left-1/2 flex -translate-x-1/2 gap-1 text-[10px] font-semibold uppercase tracking-wide text-white">
+                  {presence.map((person) => (
+                    <span
+                      key={person.id}
+                      className="rounded-full px-2 py-0.5 shadow"
+                      style={{ backgroundColor: person.color }}
+                    >
+                      {person.name
+                        .split(" ")
+                        .map((part) => part[0])
+                        .join("")}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           );
         })}
       </div>

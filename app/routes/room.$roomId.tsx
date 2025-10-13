@@ -5,26 +5,35 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { useParams } from "react-router";
 import { RequireAuth } from "../components/layout/RequireAuth";
-import { useSudokuGame, type NotesRecord, type SudokuSerializedState } from "../hooks/useSudokuGame";
+import { useSudokuGame, type NotesRecord, type SudokuSerializedState, indexToRowColumn } from "../hooks/useSudokuGame";
 import { SudokuGamePanel } from "../components/sudoku/GamePanel";
 import { useAuth } from "../contexts/AuthContext";
 import { Button } from "../components/ui/button";
-import { Share2 } from "lucide-react";
+import { Share2, X, MessageCircle } from "lucide-react";
 import { useRoomRealtime } from "../hooks/useRoomRealtime";
 import {
   updateRoomState,
   updatePresence,
   sendRoomMessage,
+  sendRoomMove,
+  sendRoomSystemEvent,
+  updateRoomStatus,
+  startRoomRematch,
   type RoomDocument,
   type RoomMember,
   type RoomEvent,
+  type RoomStatus,
 } from "../libs/rooms";
 import { boardToString } from "../libs/sudoku";
 import type { User } from "firebase/auth";
 import { RoomChat } from "../components/chat/RoomChat";
+import { MatchTimeline } from "../components/timeline/MatchTimeline";
+import { ConfettiBurst } from "../components/effects/ConfettiBurst";
+import { usePreferences } from "../contexts/PreferencesContext";
 
 export function meta({ params }: Route.MetaArgs) {
   return [
@@ -97,8 +106,32 @@ type RoomContentProps = {
 
 function RoomContent({ room, members, events, roomId, currentUser }: RoomContentProps) {
   const [copied, setCopied] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [hintsRemaining, setHintsRemaining] = useState(3);
+  const [showMobileChat, setShowMobileChat] = useState(false);
+  const [showMobileTimeline, setShowMobileTimeline] = useState(false);
+  const [rematchStatus, setRematchStatus] = useState<"idle" | "starting" | "error">("idle");
+  const { preferences } = usePreferences();
   const pendingState = useRef<SudokuSerializedState | null>(null);
   const debounceHandle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const celebrationTimeout = useRef<number | null>(null);
+  const hasCelebrated = useRef(false);
+  const lastMoveActor = useRef<string | null>(null);
+  const lastMoveActorName = useRef<string | null>(null);
+  const lastMoveIndex = useRef<number | null>(null);
+  const lastMoveWasCorrect = useRef(false);
+  const hintActionRef = useRef(false);
+  const hasActivated = useRef(room.status !== "waiting");
+  const statusRef = useRef<RoomStatus>(room.status);
+  const streakRef = useRef(0);
+  const totalCorrectRef = useRef(0);
+  const idleTimerRef = useRef<number | null>(null);
+  const lastActivityRef = useRef<number>(Date.now());
+  const idleNotifiedRef = useRef(false);
+  const joinAnnouncedRef = useRef(false);
+  const sharedCellNotificationRef = useRef<Map<number, number>>(new Map());
+  const startTimeRef = useRef<number>(Date.now());
+  const completedDurationRef = useRef<number | null>(null);
 
   const handleStatePersist = useCallback(
     (state: SudokuSerializedState) => {
@@ -139,7 +172,85 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     solution: room.solution,
     initialState: { board: room.board, notes: room.notes ?? {} },
     onChange: handleStatePersist,
+    onMove: ({ index, previousValue, nextValue }) => {
+      if (!currentUser) return;
+      const wasHint = hintActionRef.current;
+      hintActionRef.current = false;
+      const expectedChar = room.solution[index];
+      const expectedValue = Number.parseInt(expectedChar ?? "", 10);
+      const correct = nextValue !== null && Number.isInteger(expectedValue) && expectedValue === nextValue;
+      sendRoomMove(roomId, {
+        cellIndex: index,
+        value: nextValue,
+        correct,
+        actorUid: currentUser.uid,
+        actorName: currentUser.displayName ?? currentUser.email ?? "Player",
+      }).catch((error) => {
+        console.error("Failed to log move", error);
+      });
+
+      lastActivityRef.current = Date.now();
+      idleNotifiedRef.current = false;
+
+      if (!hasActivated.current && nextValue !== null) {
+        hasActivated.current = true;
+        startTimeRef.current = Date.now();
+        streakRef.current = 0;
+        totalCorrectRef.current = 0;
+        if (statusRef.current !== "active") {
+          statusRef.current = "active";
+          updateRoomStatus(roomId, "active").catch((error) =>
+            console.error("Failed to mark room active", error),
+          );
+        }
+      }
+
+      lastMoveActor.current = currentUser.uid;
+      lastMoveActorName.current = currentUser.displayName ?? currentUser.email ?? "Player";
+      lastMoveIndex.current = index;
+      lastMoveWasCorrect.current = correct && nextValue !== null;
+
+      if (previousValue !== null && nextValue === null) {
+        const { row, column } = indexToRowColumn(index);
+        sendRoomSystemEvent(roomId, {
+          text: `${lastMoveActorName.current ?? "Someone"} cleared r${row}c${column}.`,
+          level: "info",
+          actorUid: currentUser.uid,
+          actorName: lastMoveActorName.current ?? "Player",
+        }).catch((error) => console.error("Failed to log clear event", error));
+        streakRef.current = 0;
+      } else if (nextValue !== null) {
+        if (correct) {
+          if (!wasHint) {
+            streakRef.current += 1;
+            totalCorrectRef.current += 1;
+            if ([3, 5, 10].includes(streakRef.current)) {
+              const { row, column } = indexToRowColumn(index);
+              sendRoomSystemEvent(roomId, {
+                text: `${lastMoveActorName.current ?? "Your team"} hit a ${streakRef.current}-move streak (latest r${row}c${column})!`,
+                level: "success",
+                actorUid: currentUser.uid,
+                actorName: lastMoveActorName.current ?? "Player",
+              }).catch((error) => console.error("Failed to log streak event", error));
+            }
+          }
+        } else {
+          streakRef.current = 0;
+        }
+      }
+    },
   });
+
+  const peers = members.map((member) => ({
+    id: member.uid,
+    name: member.displayName,
+    color: member.color,
+    cellIndex: member.cursorIndex,
+  }));
+
+  const currentUserId = currentUser?.uid ?? null;
+  const currentMember = members.find((member) => member.uid === currentUserId) ?? null;
+  const currentMemberColor = currentMember?.color;
 
   const localBoardString = useMemo(() => boardToString(game.board), [game.board]);
 
@@ -152,29 +263,31 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
 
   useEffect(() => {
     if (!currentUser) return;
-    updatePresence(roomId, currentUser.uid, {
+    const payload: Partial<Omit<RoomMember, "uid">> = {
       displayName: currentUser.displayName ?? currentUser.email ?? "Player",
       cursorIndex: game.selectedIndex,
-    }).catch((error) => console.error("Failed to update presence", error));
-  }, [currentUser, game.selectedIndex, roomId]);
+      isTyping: false,
+    };
+    if (currentMemberColor) {
+      payload.color = currentMemberColor;
+    }
+    updatePresence(roomId, currentUser.uid, payload).catch((error) =>
+      console.error("Failed to update presence", error),
+    );
+  }, [currentMemberColor, currentUser, game.selectedIndex, roomId]);
 
   useEffect(() => {
     if (!currentUser) return;
     return () => {
-      updatePresence(roomId, currentUser.uid, { cursorIndex: null }).catch((error) =>
+      const payload: Partial<Omit<RoomMember, "uid">> = { cursorIndex: null, isTyping: false };
+      if (currentMemberColor) {
+        payload.color = currentMemberColor;
+      }
+      updatePresence(roomId, currentUser.uid, payload).catch((error) =>
         console.error("Failed to clear presence", error),
       );
     };
-  }, [currentUser, roomId]);
-
-  const peers = members.map((member) => ({
-    id: member.uid,
-    name: member.displayName,
-    color: member.color,
-    cellIndex: member.cursorIndex,
-  }));
-
-  const currentUserId = currentUser?.uid ?? null;
+  }, [currentMemberColor, currentUser, roomId]);
 
   const roomShareUrl =
     typeof window !== "undefined" ? window.location.href : `https://sudoku.local/room/${roomId}`;
@@ -208,8 +321,237 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     [currentUser, roomId],
   );
 
+  const handleRequestHint = useCallback(() => {
+    if (!preferences.allowHints) return;
+    if (hintsRemaining <= 0) return;
+    hintActionRef.current = true;
+    let targetIndex = game.selectedIndex;
+    if (game.selectedIndex === null) {
+      const nextIndex = game.board.findIndex((value, index) => value === null && !game.givenMap[index]);
+      if (nextIndex !== -1) {
+        game.actions.selectCell(nextIndex);
+        targetIndex = nextIndex;
+      } else {
+        hintActionRef.current = false;
+        return;
+      }
+    }
+    const result = game.actions.requestHint();
+    if (result !== null) {
+      setHintsRemaining((prev) => Math.max(prev - 1, 0));
+      if (currentUser && targetIndex !== null) {
+        const { row, column } = indexToRowColumn(targetIndex);
+        sendRoomSystemEvent(roomId, {
+          text: `${currentUser.displayName ?? currentUser.email ?? "A teammate"} used a hint at r${row}c${column}.`,
+          level: "warning",
+          actorUid: currentUser.uid,
+          actorName: currentUser.displayName ?? currentUser.email ?? "Player",
+        }).catch((error) => console.error("Failed to log hint system event", error));
+      }
+    }
+    hintActionRef.current = false;
+  }, [currentUser, game.actions, game.board, game.givenMap, game.selectedIndex, hintsRemaining, preferences.allowHints, roomId]);
+
+  const handleTypingChange = useCallback(
+    (isTyping: boolean) => {
+      if (!currentUser) return;
+      const payload: Partial<Omit<RoomMember, "uid">> = {
+        displayName: currentUser.displayName ?? currentUser.email ?? "Player",
+        cursorIndex: game.selectedIndex,
+        isTyping,
+      };
+      if (currentMemberColor) {
+        payload.color = currentMemberColor;
+      }
+      updatePresence(roomId, currentUser.uid, payload).catch((error) =>
+        console.error("Failed to update typing presence", error),
+      );
+    },
+    [currentMemberColor, currentUser, game.selectedIndex, roomId],
+  );
+
+  useEffect(() => {
+    if (!currentUser) return;
+    handleTypingChange(false);
+  }, [currentUser, handleTypingChange]);
+
+  const handleRematch = useCallback(async () => {
+    if (!currentUser) return;
+    setRematchStatus("starting");
+    try {
+      await startRoomRematch(
+        roomId,
+        room.difficulty,
+        currentUser.uid,
+        currentUser.displayName ?? currentUser.email ?? "Player",
+      );
+      setRematchStatus("idle");
+      setShowMobileChat(false);
+      setShowMobileTimeline(false);
+      setHintsRemaining(3);
+      hasCelebrated.current = false;
+      streakRef.current = 0;
+      totalCorrectRef.current = 0;
+      startTimeRef.current = Date.now();
+      completedDurationRef.current = null;
+      lastActivityRef.current = Date.now();
+      idleNotifiedRef.current = false;
+      statusRef.current = "waiting";
+      hasActivated.current = false;
+    } catch (error) {
+      console.error("Failed to start rematch", error);
+      setRematchStatus("error");
+    }
+  }, [currentUser, room.difficulty, roomId]);
+
+  useEffect(() => {
+    setHintsRemaining(3);
+    hasCelebrated.current = false;
+    lastMoveActor.current = null;
+    lastMoveActorName.current = null;
+    lastMoveIndex.current = null;
+    lastMoveWasCorrect.current = false;
+    statusRef.current = room.status;
+    streakRef.current = 0;
+    totalCorrectRef.current = 0;
+    lastActivityRef.current = Date.now();
+    idleNotifiedRef.current = false;
+    joinAnnouncedRef.current = false;
+    sharedCellNotificationRef.current.clear();
+    startTimeRef.current = Date.now();
+    completedDurationRef.current = null;
+  }, [roomId, room.status]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (game.isComplete && !hasCelebrated.current) {
+      hasCelebrated.current = true;
+      if (
+        currentUser &&
+        lastMoveActor.current === currentUser.uid &&
+        lastMoveWasCorrect.current &&
+        lastMoveIndex.current !== null
+      ) {
+        const { row, column } = indexToRowColumn(lastMoveIndex.current);
+        sendRoomSystemEvent(roomId, {
+          text: `${lastMoveActorName.current ?? "Your team"} completed the puzzle at r${row}c${column}!`,
+          level: "success",
+          actorUid: currentUser.uid,
+          actorName: lastMoveActorName.current ?? "Player",
+        }).catch((error) => console.error("Failed to record completion event", error));
+      }
+      if (room.status !== "completed") {
+        updateRoomStatus(roomId, "completed").catch((error) =>
+          console.error("Failed to update room status to completed", error),
+        );
+      }
+      if (!completedDurationRef.current) {
+        completedDurationRef.current = Date.now() - startTimeRef.current;
+      }
+      setShowConfetti(true);
+      celebrationTimeout.current = window.setTimeout(() => {
+        setShowConfetti(false);
+        celebrationTimeout.current = null;
+      }, 3500);
+    } else if (!game.isComplete) {
+      hasCelebrated.current = false;
+    }
+  }, [currentUser, game.isComplete, roomId]);
+
+  useEffect(() => {
+    if (!currentUser || joinAnnouncedRef.current) return;
+    joinAnnouncedRef.current = true;
+    sendRoomSystemEvent(roomId, {
+      text: `${currentUser.displayName ?? currentUser.email ?? "Someone"} joined the room.`,
+      level: "info",
+      actorUid: currentUser.uid,
+      actorName: currentUser.displayName ?? currentUser.email ?? "Player",
+    }).catch((error) => console.error("Failed to log join event", error));
+    return () => {
+      sendRoomSystemEvent(roomId, {
+        text: `${currentUser.displayName ?? currentUser.email ?? "Someone"} left the room.`,
+        level: "info",
+        actorUid: currentUser.uid,
+        actorName: currentUser.displayName ?? currentUser.email ?? "Player",
+      }).catch((error) => console.error("Failed to log leave event", error));
+    };
+  }, [currentUser, roomId]);
+
+  useEffect(() => {
+    window.clearInterval(idleTimerRef.current ?? undefined);
+    idleTimerRef.current = window.setInterval(() => {
+      const idleMs = Date.now() - lastActivityRef.current;
+      if (idleMs >= 5 * 60 * 1000 && !idleNotifiedRef.current) {
+        idleNotifiedRef.current = true;
+        sendRoomSystemEvent(roomId, {
+          text: "No moves for 5 minutes—take a breather or try a new approach!",
+          level: "info",
+        }).catch((error) => console.error("Failed to log idle reminder", error));
+      }
+    }, 60 * 1000);
+    return () => {
+      window.clearInterval(idleTimerRef.current ?? undefined);
+    };
+  }, [roomId]);
+
+  useEffect(() => {
+    const sharedCells = peers.reduce<Map<number, { count: number; names: string[] }>>((map, peer) => {
+      if (peer.cellIndex === null) return map;
+      const entry = map.get(peer.cellIndex) ?? { count: 0, names: [] };
+      entry.count += 1;
+      entry.names.push(peer.name ?? "Someone");
+      map.set(peer.cellIndex, entry);
+      return map;
+    }, new Map());
+
+    sharedCells.forEach((info, cellIndex) => {
+      if (info.count >= 2) {
+        const lastNotified = sharedCellNotificationRef.current.get(cellIndex) ?? 0;
+        if (Date.now() - lastNotified > 60 * 1000) {
+          const { row, column } = indexToRowColumn(cellIndex);
+          sendRoomSystemEvent(roomId, {
+            text: `${info.names.slice(0, 2).join(" & ")} are both focused on r${row}c${column}. Coordinate your move!`,
+            level: "warning",
+          }).catch((error) => console.error("Failed to log shared cell event", error));
+          sharedCellNotificationRef.current.set(cellIndex, Date.now());
+        }
+      } else {
+        sharedCellNotificationRef.current.delete(cellIndex);
+      }
+    });
+  }, [peers, roomId]);
+
+  useEffect(() => {
+    if (game.isComplete && statusRef.current !== "completed") {
+      statusRef.current = "completed";
+      updateRoomStatus(roomId, "completed").catch((error) =>
+        console.error("Failed to update room status to completed", error),
+      );
+      return;
+    }
+    if (!game.isComplete) {
+      const hasProgress = game.board.some((value, index) => !game.givenMap[index] && value !== null);
+      if (hasProgress && statusRef.current !== "active") {
+        statusRef.current = "active";
+        updateRoomStatus(roomId, "active").catch((error) =>
+          console.error("Failed to update room status to active", error),
+        );
+      }
+    }
+  }, [game.board, game.givenMap, game.isComplete, roomId]);
+
+  useEffect(() => {
+    return () => {
+      if (celebrationTimeout.current) {
+        window.clearTimeout(celebrationTimeout.current);
+        celebrationTimeout.current = null;
+      }
+    };
+  }, []);
+
   return (
     <div className="space-y-10">
+      {showConfetti ? <ConfettiBurst /> : null}
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Room code</p>
@@ -232,23 +574,87 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
         </div>
       </header>
 
-      <section className="grid gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+      <section className="hidden gap-6 items-start lg:grid lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <div className="space-y-6">
-          <SudokuGamePanel game={game} peers={peers} />
-          <div className="rounded-3xl border border-gray-200 bg-white p-6 text-sm shadow-sm dark:border-gray-800 dark:bg-gray-900">
-            <h2 className="text-base font-semibold text-gray-700 dark:text-gray-100">Match timeline</h2>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              Coming soon: move history, streaks, and confetti-worthy wins.
-            </p>
-          </div>
+          <SudokuGamePanel
+            game={game}
+            peers={peers}
+            onHint={handleRequestHint}
+            hintsLeft={hintsRemaining}
+            highlightColor={preferences.highlightColor}
+            showPresenceBadges={preferences.showPresenceBadges}
+            allowHints={preferences.allowHints}
+          />
+          <MatchTimeline events={events} members={members} />
         </div>
         <RoomChat
           events={events}
           members={members}
           currentUserId={currentUserId}
           onSend={handleSendMessage}
+          onTypingChange={handleTypingChange}
+          showTypingIndicators={preferences.showPresenceBadges}
         />
       </section>
+
+      <div className="space-y-4 lg:hidden">
+        <SudokuGamePanel
+          game={game}
+          peers={peers}
+          onHint={handleRequestHint}
+          hintsLeft={hintsRemaining}
+          highlightColor={preferences.highlightColor}
+          showPresenceBadges={preferences.showPresenceBadges}
+          allowHints={preferences.allowHints}
+        />
+        <div className="flex gap-3">
+          <Button className="flex-1" variant="outline" onClick={() => setShowMobileTimeline(true)}>
+            View timeline
+          </Button>
+        </div>
+      </div>
+
+      {game.isComplete ? (
+        <MatchSummary
+          durationMs={completedDurationRef.current}
+          correctMoves={totalCorrectRef.current}
+          bestStreak={streakRef.current}
+          hintsUsed={preferences.allowHints ? Math.max(0, 3 - hintsRemaining) : null}
+          onRematch={handleRematch}
+          rematchStatus={rematchStatus}
+        />
+      ) : null}
+
+      {showMobileChat ? (
+        <MobileSheet title="Room chat" onClose={() => setShowMobileChat(false)}>
+        <RoomChat
+          events={events}
+          members={members}
+          currentUserId={currentUserId}
+          onSend={handleSendMessage}
+          onTypingChange={handleTypingChange}
+          showTypingIndicators={preferences.showPresenceBadges}
+          className="max-h-[70vh]"
+        />
+        </MobileSheet>
+      ) : null}
+
+      {showMobileTimeline ? (
+        <MobileSheet title="Match timeline" onClose={() => setShowMobileTimeline(false)}>
+          <MatchTimeline events={events} members={members} />
+        </MobileSheet>
+      ) : null}
+
+      {!showMobileChat ? (
+        <button
+          type="button"
+          onClick={() => setShowMobileChat(true)}
+          className="fixed bottom-5 right-5 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 lg:hidden"
+          aria-label="Open chat"
+        >
+          <MessageCircle className="h-6 w-6" aria-hidden="true" />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -272,4 +678,116 @@ function notesEqual(a: NotesRecord, b: NotesRecord) {
 
 function capitalize(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+type MobileSheetProps = {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+};
+
+function MobileSheet({ title, children, onClose }: MobileSheetProps) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-black/50 px-4 pb-4 pt-12 lg:hidden" role="dialog" aria-modal="true">
+      <div className="mb-4 flex justify-center">
+        <span className="h-1.5 w-16 rounded-full bg-white/70" />
+      </div>
+      <div className="relative mt-auto w-full max-h-[80vh] overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+        <header className="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-slate-800">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-gray-100"
+            aria-label="Close panel"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </header>
+        <div className="max-h-[70vh] overflow-y-auto px-4 pb-4 pt-3">{children}</div>
+      </div>
+      <button className="absolute inset-0 -z-10" type="button" onClick={onClose} aria-hidden="true" />
+    </div>
+  );
+}
+
+type MatchSummaryProps = {
+  durationMs: number | null;
+  correctMoves: number;
+  bestStreak: number;
+  hintsUsed: number | null;
+  onRematch: () => void;
+  rematchStatus: "idle" | "starting" | "error";
+};
+
+function MatchSummary({ durationMs, correctMoves, bestStreak, hintsUsed, onRematch, rematchStatus }: MatchSummaryProps) {
+  return (
+    <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Match summary</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Review the highlights from this puzzle.</p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={onRematch}
+            disabled={rematchStatus === "starting"}
+          >
+            {rematchStatus === "starting" ? "Starting…" : "Rematch"}
+          </Button>
+        </div>
+      </header>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <SummaryCard label="Duration" value={formatDuration(durationMs)} />
+        <SummaryCard label="Correct moves" value={`${correctMoves}`} />
+        <SummaryCard label="Best streak" value={`${bestStreak}`} />
+        <SummaryCard label="Hints used" value={hintsUsed === null ? "—" : `${hintsUsed}`} />
+      </div>
+      {rematchStatus === "error" ? (
+        <p className="mt-3 text-xs text-rose-500">We couldn’t start a rematch. Try again in a moment.</p>
+      ) : null}
+    </div>
+  );
+}
+
+type SummaryCardProps = {
+  label: string;
+  value: string;
+};
+
+function SummaryCard({ label, value }: SummaryCardProps) {
+  return (
+    <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm dark:border-gray-800 dark:bg-gray-900/70">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p>
+      <p className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">{value}</p>
+    </div>
+  );
+}
+
+function formatDuration(durationMs: number | null) {
+  if (!durationMs || durationMs < 1000) return "—";
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const remMinutes = minutes % 60;
+    return `${hours}h ${remMinutes}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+  }
+  return `${seconds}s`;
 }
