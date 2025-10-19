@@ -30,41 +30,19 @@ export function AppShell({ children }: AppShellProps) {
   const location = useLocation();
 
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50 text-gray-900 transition-colors dark:bg-gray-950 dark:text-gray-50">
+    <div className="flex min-h-screen w-full flex-col overflow-x-hidden bg-gray-50 text-gray-900 transition-colors dark:bg-gray-950 dark:text-gray-50">
       <header className="sticky top-0 z-40 border-b border-gray-200 bg-white/80 backdrop-blur-lg dark:border-gray-800 dark:bg-gray-950/80">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <NavLink to="/" className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 sm:px-6 lg:px-8">
+          <NavLink
+            to="/"
+            className="order-1 flex shrink-0 items-center gap-2 text-lg font-semibold tracking-tight text-gray-900 transition hover:text-blue-600 dark:text-gray-100 dark:hover:text-blue-400"
+          >
             <span className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 text-white shadow-md">
               <span className="text-sm font-bold">S</span>
             </span>
             Sudoku Together
           </NavLink>
-          <nav className="hidden items-center gap-6 md:flex">
-            {navItems
-              .filter((item) => (item.requiresAuth ? auth.status === "authenticated" : true))
-              .map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className={({ isActive }) =>
-                    clsx(
-                      "text-sm font-medium transition hover:text-blue-600 dark:hover:text-blue-400",
-                      isActive ? "text-blue-600 dark:text-blue-400" : "text-gray-600 dark:text-gray-300",
-                    )
-                  }
-                >
-                  {item.label}
-                </NavLink>
-              ))}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowPreferences(true)}
-            >
-              Preferences
-            </Button>
-          </nav>
-          <div className="flex items-center gap-3">
+          <div className="order-2 ml-auto flex shrink-0 items-center gap-3 lg:order-3">
             <Button
               variant="ghost"
               size="sm"
@@ -135,6 +113,34 @@ export function AppShell({ children }: AppShellProps) {
               Preferences
             </Button>
           </div>
+          <nav className="order-3 flex w-full flex-wrap items-center gap-2 border-t border-gray-200 pt-2 text-sm md:border-none md:pt-0 md:justify-center lg:order-2 lg:w-auto lg:flex-nowrap lg:gap-6">
+            {navItems
+              .filter((item) => (item.requiresAuth ? auth.status === "authenticated" : true))
+              .map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    clsx(
+                      "inline-flex items-center rounded-full px-3 py-1.5 font-medium transition",
+                      isActive
+                        ? "bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300"
+                        : "text-gray-600 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-400",
+                    )
+                  }
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            <Button
+              variant="outline"
+              size="sm"
+              className="hidden md:inline-flex"
+              onClick={() => setShowPreferences(true)}
+            >
+              Preferences
+            </Button>
+          </nav>
         </div>
       </header>
       <main className="flex-1">
