@@ -13,7 +13,7 @@ type AppShellProps = {
   children: ReactNode;
 };
 
-const navItems = [
+const baseNavItems = [
   { to: "/lobby", label: "Lobby", requiresAuth: true },
   { to: "/rooms", label: "My Rooms", requiresAuth: true },
   { to: "/about", label: "About", requiresAuth: false },
@@ -28,6 +28,7 @@ export function AppShell({ children }: AppShellProps) {
   const [showPreferences, setShowPreferences] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const currentUser = auth.status === "authenticated" ? auth.user : null;
 
   return (
     <div className="flex min-h-screen w-full flex-col overflow-x-hidden bg-gray-50 text-gray-900 transition-colors dark:bg-gray-950 dark:text-gray-50">
@@ -65,15 +66,15 @@ export function AppShell({ children }: AppShellProps) {
             >
               <SlidersHorizontal className="h-5 w-5" aria-hidden="true" />
             </Button>
-            {auth.status === "authenticated" && (
+            {currentUser && (
               <div className="hidden items-center gap-3 md:flex">
                 <Avatar
-                  src={auth.user.photoURL}
-                  name={auth.user.displayName ?? auth.user.email}
+                  src={currentUser.photoURL}
+                  name={currentUser.displayName ?? currentUser.email}
                   size="sm"
                 />
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                  {auth.user.displayName ?? auth.user.email}
+                  {currentUser.displayName ?? currentUser.email}
                 </span>
               </div>
             )}
@@ -114,7 +115,7 @@ export function AppShell({ children }: AppShellProps) {
             </Button>
           </div>
           <nav className="order-3 flex w-full flex-wrap items-center gap-2 border-t border-gray-200 pt-2 text-sm md:border-none md:pt-0 md:justify-center lg:order-2 lg:w-auto lg:flex-nowrap lg:gap-6">
-            {navItems
+            {[...baseNavItems, ...(auth.status === "authenticated" && !auth.isAdminLoading && auth.isAdmin ? [{ to: "/admin", label: "Admin", requiresAuth: true }] : [])]
               .filter((item) => (item.requiresAuth ? auth.status === "authenticated" : true))
               .map((item) => (
                 <NavLink

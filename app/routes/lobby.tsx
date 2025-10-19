@@ -17,8 +17,8 @@ export function meta({}: Route.MetaArgs) {
 
 export default function Lobby() {
   const auth = useAuth();
-  const { rooms, loading } = useRoomsList();
   const currentUser = auth.status === "authenticated" ? auth.user : null;
+  const { rooms, loading } = useRoomsList({ viewerUid: currentUser?.uid });
   const [statusFilter, setStatusFilter] = useState<"all" | "waiting" | "active" | "completed">("all");
   const [difficultyFilter, setDifficultyFilter] = useState<Difficulty | "all">("all");
   const [copiedRoomId, setCopiedRoomId] = useState<string | null>(null);

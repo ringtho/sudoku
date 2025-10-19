@@ -15,7 +15,10 @@ export function meta({}: Route.MetaArgs) {
 export default function Rooms() {
   const auth = useAuth();
   const currentUser = auth.status === "authenticated" ? auth.user : null;
-  const { rooms, loading } = useRoomsList({ ownerUid: currentUser?.uid });
+  const { rooms, loading } = useRoomsList({
+    viewerUid: currentUser?.uid,
+    ownerUid: currentUser?.uid,
+  });
 
   return (
     <RequireAuth>

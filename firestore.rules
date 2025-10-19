@@ -5,32 +5,114 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isMember(roomId) {
-      return exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid));
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    function roomData(roomId) {
+      return resource != null && resource.data != null && resource.data.ownerUid != null
+        ? resource.data
+        : get(/databases/$(database)/documents/rooms/$(roomId)).data;
+    }
+
+    function roomAllowsUid(room, uid) {
+      return room != null && room.allowedUids != null && (
+        (room.allowedUids is list && room.allowedUids.hasAny([uid])) ||
+        (room.allowedUids is map && uid in room.allowedUids)
+      );
+    }
+
+    function isOwner(roomId) {
+      let room = roomData(roomId);
+      return request.auth != null && room != null && room.ownerUid == request.auth.uid;
+    }
+
+    function isAllowed(roomId) {
+      let room = roomData(roomId);
+      return request.auth != null && (
+        (room != null && room.ownerUid == request.auth.uid) ||
+        roomAllowsUid(room, request.auth.uid)
+      );
+    }
+
+    function isAllowedAfter(roomId) {
+      return request.auth != null && (
+        getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.ownerUid == request.auth.uid ||
+        (getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.allowedUids != null &&
+          request.auth.uid in getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.allowedUids)
+      );
     }
 
     match /rooms/{roomId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() && (isAllowed(roomId) || isAdmin());
 
-      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow create: if isSignedIn() &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.allowedUids.size() == 1 &&
+        request.resource.data.allowedUids[0] == request.auth.uid;
 
       allow update: if isSignedIn() && (
-        resource.data.ownerUid == request.auth.uid ||
-        isMember(roomId)
+        request.auth.uid == resource.data.ownerUid ||
+        isAdmin() ||
+        (
+          request.auth.uid in resource.data.allowedUids &&
+          request.resource.data.allowedUids == resource.data.allowedUids
+        )
       );
 
-      allow delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+      allow delete: if isSignedIn() && (resource.data.ownerUid == request.auth.uid || isAdmin());
 
       match /members/{memberId} {
-        allow read: if isSignedIn();
-        allow write: if isSignedIn() && request.auth.uid == memberId;
+        allow read: if isSignedIn() && (isAllowed(roomId) || isAdmin());
+        allow write: if isSignedIn() && request.auth.uid == memberId && (isAllowed(roomId) || isAllowedAfter(roomId));
       }
 
       match /events/{eventId} {
-        allow read: if isSignedIn() && isMember(roomId);
-        allow create: if isSignedIn() && isMember(roomId);
+        allow read: if isSignedIn() && (isAllowed(roomId) || isAdmin());
+        allow create: if isSignedIn() && (isAllowed(roomId) || isAdmin());
         allow update, delete: if false;
       }
+
+      match /invites/{inviteId} {
+        allow read: if isSignedIn() && (
+          isAdmin() ||
+          isOwner(roomId) ||
+          (resource.data.createdBy != null && resource.data.createdBy == request.auth.uid) ||
+          (resource.data.mode == "link") ||
+          (resource.data.targetEmail != null && request.auth.token.email != null &&
+            request.auth.token.email == resource.data.targetEmail) ||
+          (resource.data.redeemedBy != null && resource.data.redeemedBy == request.auth.uid)
+        );
+
+        allow create: if isSignedIn() && (
+          get(/databases/$(database)/documents/rooms/$(roomId)).data.ownerUid == request.auth.uid ||
+          isAdmin()
+        );
+
+        allow update: if isSignedIn() && (
+          get(/databases/$(database)/documents/rooms/$(roomId)).data.ownerUid == request.auth.uid ||
+          isAdmin() ||
+          (
+            resource.data.redeemedBy == null &&
+            request.resource.data.redeemedBy == request.auth.uid &&
+            (
+              resource.data.mode == "link" ||
+              (resource.data.targetEmail != null && request.auth.token.email == resource.data.targetEmail)
+            )
+          )
+        );
+
+        allow delete: if isSignedIn() && (
+          get(/databases/$(database)/documents/rooms/$(roomId)).data.ownerUid == request.auth.uid ||
+          isAdmin()
+        );
+      }
+    }
+
+    match /profiles/{uid} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && request.auth.uid == uid;
+      allow delete: if false;
     }
   }
 }

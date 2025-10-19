@@ -1,11 +1,14 @@
 import {
   addDoc,
+  arrayRemove,
+  arrayUnion,
   collection,
   doc,
   limit,
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -15,6 +18,7 @@ import {
   type DocumentSnapshot,
   type Timestamp,
   type QueryConstraint,
+  type FirestoreError,
 } from "firebase/firestore";
 import { getFirebase } from "./firebase";
 import { generateSudoku, type Difficulty } from "./sudoku";
@@ -36,6 +40,7 @@ export type RoomDocument = {
   solution: string;
   board: string;
   notes: NotesRecord;
+  allowedUids: string[];
 };
 
 export type RoomMember = {
@@ -105,6 +110,7 @@ export async function createRoom({ name, difficulty, ownerUid, ownerName, ownerC
     solution,
     board: puzzle,
     notes: {},
+    allowedUids: [ownerUid],
   });
 
   const memberRef = doc(membersCollection(db, roomRef.id), ownerUid);
@@ -129,50 +135,85 @@ export async function updateRoomState(roomId: string, state: SudokuSerializedSta
   });
 }
 
+export type ListenToRoomsOptions = {
+  viewerUid: string;
+  ownerUid?: string;
+  limitTo?: number;
+};
+
 export function listenToRooms(
-  options: { ownerUid?: string; limitTo?: number } = {},
+  options: ListenToRoomsOptions,
   callback: (rooms: RoomDocument[]) => void,
+  onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { db } = getFirebase();
-  const constraints: QueryConstraint[] = [orderBy("updatedAt", "desc")];
+  const constraints: QueryConstraint[] = [];
   if (options.ownerUid) {
     constraints.push(where("ownerUid", "==", options.ownerUid));
+  } else {
+    constraints.push(where("allowedUids", "array-contains", options.viewerUid));
   }
-  if (options.limitTo) {
-    constraints.push(limit(options.limitTo));
-  }
-  const baseQuery = query(roomsCollection(db), ...constraints);
+  const baseQuery = constraints.length > 0 ? query(roomsCollection(db), ...constraints) : roomsCollection(db);
 
-  return onSnapshot(baseQuery, (snapshot) => {
-    const rooms = snapshot.docs.map(transformRoomSnapshot);
-    callback(rooms);
-  });
+  return onSnapshot(
+    baseQuery,
+    (snapshot) => {
+      const rooms = snapshot.docs.map(transformRoomSnapshot);
+      rooms.sort((a, b) => {
+        const aTime = a.updatedAt ? a.updatedAt.toMillis() : 0;
+        const bTime = b.updatedAt ? b.updatedAt.toMillis() : 0;
+        return bTime - aTime;
+      });
+      const limitedRooms = options.limitTo ? rooms.slice(0, options.limitTo) : rooms;
+      callback(limitedRooms);
+    },
+    (error) => {
+      onError?.(error);
+    },
+  );
 }
 
-export function listenToRoom(roomId: string, callback: (room: RoomDocument | null) => void): Unsubscribe {
+export function listenToRoom(
+  roomId: string,
+  callback: (room: RoomDocument | null) => void,
+  onError?: (error: FirestoreError) => void,
+): Unsubscribe {
   const { db } = getFirebase();
-  return onSnapshot(roomDoc(db, roomId), (snapshot) => {
-    if (!snapshot.exists()) {
-      callback(null);
-      return;
-    }
-    callback(transformRoomSnapshot(snapshot));
-  });
+  return onSnapshot(
+    roomDoc(db, roomId),
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        callback(null);
+        return;
+      }
+      callback(transformRoomSnapshot(snapshot));
+    },
+    (error) => {
+      onError?.(error);
+    },
+  );
 }
 
 export function listenToRoomMembers(
   roomId: string,
   callback: (members: RoomMember[]) => void,
+  onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { db } = getFirebase();
   const membersQuery = query(membersCollection(db, roomId), orderBy("displayName", "asc"));
-  return onSnapshot(membersQuery, (snapshot) => {
-    const members = snapshot.docs.map((docSnap) => ({
-      uid: docSnap.id,
-      ...(docSnap.data() as Omit<RoomMember, "uid">),
-    }));
-    callback(members);
-  });
+  return onSnapshot(
+    membersQuery,
+    (snapshot) => {
+      const members = snapshot.docs.map((docSnap) => ({
+        uid: docSnap.id,
+        ...(docSnap.data() as Omit<RoomMember, "uid">),
+      }));
+      callback(members);
+    },
+    (error) => {
+      onError?.(error);
+    },
+  );
 }
 
 export async function updatePresence(
@@ -237,6 +278,7 @@ export function listenToRoomEvents(
   roomId: string,
   callback: (events: RoomEvent[]) => void,
   options: { limitTo?: number } = {},
+  onError?: (error: FirestoreError) => void,
 ): Unsubscribe {
   const { db } = getFirebase();
   const constraints: QueryConstraint[] = [orderBy("createdAt", "desc")];
@@ -244,13 +286,19 @@ export function listenToRoomEvents(
     constraints.push(limit(options.limitTo));
   }
   const eventsQuery = query(eventsCollection(db, roomId), ...constraints);
-  return onSnapshot(eventsQuery, (snapshot) => {
-    const nextEvents = snapshot.docs.map((docSnap) => {
-      const data = docSnap.data();
-      return { id: docSnap.id, ...(data as Omit<RoomEvent, "id">) } as RoomEvent;
-    });
-    callback(nextEvents.reverse());
-  });
+  return onSnapshot(
+    eventsQuery,
+    (snapshot) => {
+      const nextEvents = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data();
+        return { id: docSnap.id, ...(data as Omit<RoomEvent, "id">) } as RoomEvent;
+      });
+      callback(nextEvents.reverse());
+    },
+    (error) => {
+      onError?.(error);
+    },
+  );
 }
 
 export async function sendRoomMessage(roomId: string, data: { text: string; actorUid: string; actorName: string }) {
@@ -304,6 +352,24 @@ export async function updateRoomStatus(roomId: string, status: RoomStatus) {
   });
 }
 
+export async function allowRoomParticipant(roomId: string, targetUid: string) {
+  const { db } = getFirebase();
+  const docRef = roomDoc(db, roomId);
+  await updateDoc(docRef, {
+    allowedUids: arrayUnion(targetUid),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function revokeRoomParticipant(roomId: string, targetUid: string) {
+  const { db } = getFirebase();
+  const docRef = roomDoc(db, roomId);
+  await updateDoc(docRef, {
+    allowedUids: arrayRemove(targetUid),
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function startRoomRematch(
   roomId: string,
   difficulty: Difficulty,
@@ -350,6 +416,7 @@ function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
       board: "".padEnd(81, "."),
       ownerColor: undefined,
       notes: {},
+      allowedUids: [],
     } satisfies RoomDocument;
   }
   return {
@@ -357,5 +424,6 @@ function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
     ...data,
     ownerName: data.ownerName ?? "",
     ownerColor: data.ownerColor,
+    allowedUids: data.allowedUids ?? [data.ownerUid],
   } satisfies RoomDocument;
 }

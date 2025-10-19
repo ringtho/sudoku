@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import clsx from "clsx";
+
 import type { RoomEvent, RoomMember } from "../../libs/rooms";
 import { Button } from "../ui/button";
-import clsx from "clsx";
 
 type ChatEvent = Extract<RoomEvent, { type: "chat" }>;
 
@@ -16,6 +17,8 @@ type RoomChatProps = {
   showTypingIndicators?: boolean;
   variant?: "card" | "sheet";
 };
+
+const DEFAULT_CARD_HEIGHT = "h-[520px] md:h-[560px] lg:h-[600px]";
 
 export function RoomChat({
   events,
@@ -35,6 +38,7 @@ export function RoomChat({
   const typingTimeout = useRef<number | null>(null);
   const initialScrollRef = useRef(true);
   const composerRef = useRef<HTMLFormElement | null>(null);
+  const [composerHeight, setComposerHeight] = useState(0);
 
   const chatEvents = events;
 
@@ -68,16 +72,34 @@ export function RoomChat({
     }
   };
 
+  useLayoutEffect(() => {
+    const updateHeight = () => {
+      setComposerHeight(composerRef.current?.offsetHeight ?? 0);
+    };
+    updateHeight();
+    window.addEventListener("resize", updateHeight);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined" && composerRef.current) {
+      observer = new ResizeObserver(updateHeight);
+      observer.observe(composerRef.current);
+    }
+
+    return () => {
+      window.removeEventListener("resize", updateHeight);
+      observer?.disconnect();
+    };
+  }, []);
+
   useEffect(() => {
     const container = scrollRef.current;
     if (!container) return;
 
     const scrollToBottom = (behavior: ScrollBehavior) => {
-    const composerHeight = composerRef.current?.offsetHeight ?? 0;
-    const target = container.scrollHeight - composerHeight;
+      const target = container.scrollHeight - container.clientHeight;
       const run = () =>
         container.scrollTo({
-          top: Math.max(target, 0),
+          top: target > 0 ? target : 0,
           behavior,
         });
       if (typeof window !== "undefined") {
@@ -101,7 +123,8 @@ export function RoomChat({
     }
 
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    const isAtBottom = distanceFromBottom < 96;
+    const threshold = variant === "card" ? 96 : Math.max(composerHeight + 48, 160);
+    const isAtBottom = distanceFromBottom <= threshold;
 
     if (isAtBottom) {
       scrollToBottom(chatEvents.length <= 1 ? "auto" : "smooth");
@@ -109,7 +132,7 @@ export function RoomChat({
     } else {
       setShowScrollHint(true);
     }
-  }, [chatEvents]);
+  }, [chatEvents, composerHeight, variant]);
 
   useEffect(() => {
     return () => {
@@ -123,18 +146,29 @@ export function RoomChat({
 
   const isCard = variant === "card";
 
+  const outerClasses = clsx(
+    "flex min-h-0 w-full flex-col",
+    isCard
+      ? "overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950"
+      : "flex-1 bg-white dark:bg-slate-900 sm:-mx-4",
+    !className && isCard ? DEFAULT_CARD_HEIGHT : null,
+    className,
+  );
+
+  const messagePaddingBottom = !isCard
+    ? composerHeight > 0
+      ? `calc(${composerHeight}px + env(safe-area-inset-bottom, 0px) + 0.75rem)`
+      : "calc(env(safe-area-inset-bottom, 0px) + 1.75rem)"
+    : undefined;
+
+  const scrollHintBottom = !isCard
+    ? composerHeight > 0
+      ? `calc(${composerHeight}px + env(safe-area-inset-bottom, 0px) + 0.5rem)`
+      : "calc(env(safe-area-inset-bottom, 0px) + 2rem)"
+    : undefined;
+
   return (
-    <div
-      className={clsx(
-        "flex h-full min-h-0 flex-col",
-        isCard
-          ? "overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950"
-          : "bg-transparent",
-        className,
-        !className && isCard ? "max-h-[360px] md:max-h-[540px]" : null,
-      )}
-      style={maxHeight ? { maxHeight } : undefined}
-    >
+    <div className={outerClasses} style={maxHeight ? { maxHeight } : undefined}>
       {isCard ? (
         <header className="flex items-center justify-between border-b border-gray-100 px-4 py-3 text-sm font-medium text-gray-600 dark:border-gray-800 dark:text-gray-300">
           <span>Room chat</span>
@@ -144,13 +178,14 @@ export function RoomChat({
         </header>
       ) : null}
 
-      <div className="relative flex-1 overflow-hidden">
+      <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden">
         <div
           ref={scrollRef}
-        className={clsx(
-          "flex h-full min-h-0 flex-col space-y-3 overflow-y-auto px-4 text-sm",
-          isCard ? "py-4" : "pt-2 pb-32",
-        )}
+          className={clsx(
+            "flex-1 min-h-0 overflow-y-auto px-4 text-sm space-y-3",
+            isCard ? "py-4" : "pt-2",
+          )}
+          style={!isCard ? { paddingBottom: messagePaddingBottom } : undefined}
         >
           {chatEvents.length === 0 ? (
             <div className="flex h-full items-center justify-center text-xs text-gray-400 dark:text-gray-500">
@@ -166,19 +201,15 @@ export function RoomChat({
                 .join("")
                 .slice(0, 2)
                 .toUpperCase();
-              const avatarStyle = member ? { backgroundColor: member.color } : undefined;
 
               return (
-                <div
-                  key={event.id}
-                  className={clsx("flex items-start gap-2", isSelf ? "flex-row-reverse text-right" : "")}
-                >
+                <div key={event.id} className={clsx("flex items-start gap-2", isSelf ? "flex-row-reverse text-right" : "")}>
                   <div
                     className={clsx(
                       "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white shadow-sm",
                       member?.color ? "ring-2 ring-white dark:ring-gray-900" : "bg-slate-400",
                     )}
-                    style={member ? avatarStyle : undefined}
+                    style={member ? { backgroundColor: member.color } : undefined}
                   >
                     {initials ?? member?.displayName?.charAt(0) ?? "?"}
                   </div>
@@ -191,16 +222,18 @@ export function RoomChat({
                     )}
                   >
                     {isSelf ? null : (
-                      <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-300">
+                      <div className="mb-1 text-[11px] font-semibold text-gray-500 dark:text-gray-300">
                         {member?.displayName ?? event.actorName}
                       </div>
                     )}
                     <p className="whitespace-pre-wrap text-sm leading-relaxed">{event.text}</p>
                     {event.createdAt ? (
-                      <time className={clsx(
-                        "mt-1 block text-[10px] tracking-wide",
-                        isSelf ? "text-white/70" : "text-gray-500 dark:text-gray-400",
-                      )}>
+                      <time
+                        className={clsx(
+                          "mt-1 block text-[10px] tracking-wide",
+                          isSelf ? "text-white/70" : "text-gray-500 dark:text-gray-400",
+                        )}
+                      >
                         {event.createdAt.toDate().toLocaleTimeString([], {
                           hour: "numeric",
                           minute: "2-digit",
@@ -218,10 +251,16 @@ export function RoomChat({
             type="button"
             className={clsx(
               "absolute left-1/2 -translate-x-1/2 rounded-full px-3 py-1 text-xs font-medium shadow-lg transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2",
-              isCard
-                ? "bottom-24 bg-gray-900/80 text-white backdrop-blur hover:bg-gray-900 dark:bg-white/20"
-                : "bottom-20 bg-gray-900 text-white hover:bg-gray-800 dark:bg-white/20",
+              isCard ? "bottom-24 bg-gray-900/80 text-white backdrop-blur hover:bg-gray-900 dark:bg-white/20" : "bg-gray-900 text-white hover:bg-gray-800 dark:bg-white/20",
             )}
+            style={
+              !isCard
+                ? {
+                    bottom: scrollHintBottom,
+                    zIndex: 30,
+                  }
+                : { zIndex: 30 }
+            }
             onClick={() => {
               const container = scrollRef.current;
               if (!container) return;
@@ -237,11 +276,17 @@ export function RoomChat({
         ref={composerRef}
         onSubmit={handleSubmit}
         className={clsx(
-          "border-t border-gray-100 p-3 dark:border-gray-800",
           isCard
-            ? undefined
-            : "sticky bottom-0 left-0 right-0 border-transparent bg-white/95 px-4 pb-4 pt-3 backdrop-blur-md dark:bg-slate-950/90",
+            ? "border-t border-gray-100 p-3 dark:border-gray-800"
+            : "border-t border-transparent bg-transparent px-4 pb-4 pt-4",
         )}
+        style={
+          !isCard
+            ? {
+                paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + 1rem)`,
+              }
+            : undefined
+        }
       >
         <div className="flex items-end gap-2">
           <textarea
@@ -281,14 +326,14 @@ export function RoomChat({
             }}
             placeholder="Say something nice…"
             rows={2}
-            className="flex-1 resize-none rounded-2xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm outline-none ring-blue-500 focus:ring-2 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100"
+            className={clsx(
+              "flex-1 resize-none rounded-2xl border px-3 py-2 text-sm text-gray-800 outline-none ring-blue-500 focus:ring-2",
+              isCard
+                ? "border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100"
+                : "border-gray-200 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100",
+            )}
           />
-          <Button
-            type="submit"
-            variant="primary"
-            size="sm"
-            disabled={!message.trim() || sending}
-          >
+          <Button type="submit" variant="primary" size="sm" disabled={!message.trim() || sending}>
             Send
           </Button>
         </div>

@@ -24,6 +24,7 @@ import {
 import { boardToString } from "../libs/sudoku";
 import type { User } from "firebase/auth";
 import { RoomChat } from "../components/chat/RoomChat";
+import { RoomAccessPanel } from "../components/room/RoomAccessPanel";
 import { MatchTimeline } from "../components/timeline/MatchTimeline";
 import { ConfettiBurst } from "../components/effects/ConfettiBurst";
 import { usePreferences } from "../contexts/PreferencesContext";
@@ -58,7 +59,7 @@ export default function Room() {
 
 function RoomLoader({ roomId }: { roomId: string }) {
   const auth = useAuth();
-  const { room, members, events, loading } = useRoomRealtime(roomId);
+  const { room, members, events, loading, error } = useRoomRealtime(roomId);
 
   if (loading) {
     return (
@@ -67,6 +68,11 @@ function RoomLoader({ roomId }: { roomId: string }) {
         <p className="text-sm text-gray-500 dark:text-gray-400">Loading room data...</p>
       </div>
     );
+  }
+
+  if (error && error.code === "permission-denied") {
+    const currentUser = auth.status === "authenticated" ? auth.user : null;
+    return <RoomAccessDenied currentUser={currentUser} />;
   }
 
   if (!room) {
@@ -108,6 +114,14 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   const [showMobileTimeline, setShowMobileTimeline] = useState(false);
   const [rematchStatus, setRematchStatus] = useState<"idle" | "starting" | "error">("idle");
   const { preferences } = usePreferences();
+  const currentUserId = currentUser?.uid ?? null;
+  const allowedUids = room.allowedUids ?? [];
+  const isOwner = currentUserId === room.ownerUid;
+  const isAllowed = Boolean(currentUserId && (isOwner || allowedUids.includes(currentUserId)));
+
+  if (!isAllowed) {
+    return <RoomAccessDenied currentUser={currentUser} />;
+  }
   const pendingState = useRef<SudokuSerializedState | null>(null);
   const debounceHandle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const celebrationTimeout = useRef<number | null>(null);
@@ -253,7 +267,6 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     cellIndex: member.cursorIndex,
   }));
 
-  const currentUserId = currentUser?.uid ?? null;
   const chatEvents = useMemo(
     () => events.filter((event): event is ChatEvent => event.type === "chat") as ChatEvent[],
     [events],
@@ -607,14 +620,25 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
           />
           <MatchTimeline events={events} members={members} />
         </div>
-        <RoomChat
-          events={chatEvents}
-          members={members}
-          currentUserId={currentUserId}
-          onSend={handleSendMessage}
-          onTypingChange={handleTypingChange}
-          showTypingIndicators={preferences.showPresenceBadges}
-        />
+        <div className="space-y-6">
+          <RoomChat
+            events={chatEvents}
+            members={members}
+            currentUserId={currentUserId}
+            onSend={handleSendMessage}
+            onTypingChange={handleTypingChange}
+            showTypingIndicators={preferences.showPresenceBadges}
+          />
+          {isOwner ? (
+            <RoomAccessPanel
+              roomId={roomId}
+              roomName={room.name}
+              ownerUid={room.ownerUid}
+              allowedUids={allowedUids}
+              currentUid={currentUserId ?? ""}
+            />
+          ) : null}
+        </div>
       </section>
 
       <div className="space-y-4 lg:hidden">
@@ -632,6 +656,15 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
             View timeline
           </Button>
         </div>
+        {isOwner ? (
+          <RoomAccessPanel
+            roomId={roomId}
+            roomName={room.name}
+            ownerUid={room.ownerUid}
+            allowedUids={allowedUids}
+            currentUid={currentUserId ?? ""}
+          />
+        ) : null}
       </div>
 
       {matchSummary ? (
@@ -655,7 +688,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
             onTypingChange={handleTypingChange}
             showTypingIndicators={preferences.showPresenceBadges}
             variant="sheet"
-            className="max-h-[70vh] h-full"
+            className="flex-1 max-h-[70vh]"
           />
         </MobileSheet>
       ) : null}
@@ -728,7 +761,7 @@ function MobileSheet({ title, children, onClose }: MobileSheetProps) {
       <div className="mb-4 flex justify-center">
         <span className="h-1.5 w-16 rounded-full bg-white/70" />
       </div>
-      <div className="relative mt-auto w-full max-h-[80vh] overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+      <div className="relative mt-auto flex h-full w-full max-h-[80vh] min-h-0 flex-col overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
         <header className="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-slate-800">
           <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
           <button
@@ -740,9 +773,52 @@ function MobileSheet({ title, children, onClose }: MobileSheetProps) {
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </header>
-        <div className="max-h-[70vh] overflow-y-auto px-4 pb-4 pt-3">{children}</div>
+        <div className="flex h-full min-h-0 flex-col">
+          {children}
+        </div>
       </div>
       <button className="absolute inset-0 -z-10" type="button" onClick={onClose} aria-hidden="true" />
+    </div>
+  );
+}
+
+function RoomAccessDenied({ currentUser }: { currentUser: User | null }) {
+  const uid = currentUser?.uid ?? "Sign in to view your UID";
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <div className="mx-auto max-w-xl space-y-6 rounded-3xl border border-amber-300 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+      <div>
+        <h2 className="text-lg font-semibold">Access required</h2>
+        <p className="mt-1 text-sm text-amber-800 dark:text-amber-200">
+          Only the host can grant access to this private room. Share your user ID with them so they can add you.
+        </p>
+      </div>
+      <div className="space-y-2 rounded-2xl bg-white p-4 text-xs text-gray-600 shadow-sm dark:bg-slate-900 dark:text-gray-300">
+        <p className="font-medium text-gray-700 dark:text-gray-200">Your user ID</p>
+        <p className="break-all font-mono text-[11px]">{uid}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs"
+          onClick={async () => {
+            try {
+              if (typeof navigator !== "undefined" && navigator.clipboard) {
+                await navigator.clipboard.writeText(uid);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              }
+            } catch (error) {
+              console.error("Failed to copy UID", error);
+            }
+          }}
+        >
+          {copied ? "Copied" : "Copy ID"}
+        </Button>
+      </div>
+      <p className="text-xs text-amber-800 dark:text-amber-200">
+        Already added? Reload the page once the host confirms they&apos;ve granted you access.
+      </p>
     </div>
   );
 }
