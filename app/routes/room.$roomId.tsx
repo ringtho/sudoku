@@ -98,6 +98,8 @@ type RoomContentProps = {
   currentUser: User | null;
 };
 
+type ChatEvent = Extract<RoomEvent, { type: "chat" }>;
+
 function RoomContent({ room, members, events, roomId, currentUser }: RoomContentProps) {
   const [copied, setCopied] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
@@ -252,7 +254,11 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   }));
 
   const currentUserId = currentUser?.uid ?? null;
-  const unreadChatCount = useUnreadChat(events, showMobileChat, currentUserId, roomId);
+  const chatEvents = useMemo(
+    () => events.filter((event): event is ChatEvent => event.type === "chat") as ChatEvent[],
+    [events],
+  );
+  const unreadChatCount = useUnreadChat(chatEvents, showMobileChat, currentUserId, roomId);
   const currentMember = members.find((member) => member.uid === currentUserId) ?? null;
   const currentMemberColor = currentMember?.color;
 
@@ -602,7 +608,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
           <MatchTimeline events={events} members={members} />
         </div>
         <RoomChat
-          events={events}
+          events={chatEvents}
           members={members}
           currentUserId={currentUserId}
           onSend={handleSendMessage}
@@ -642,13 +648,14 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       {showMobileChat ? (
         <MobileSheet title="Room chat" onClose={() => setShowMobileChat(false)}>
           <RoomChat
-            events={events}
+            events={chatEvents}
             members={members}
             currentUserId={currentUserId}
             onSend={handleSendMessage}
             onTypingChange={handleTypingChange}
             showTypingIndicators={preferences.showPresenceBadges}
-            className="max-h-[70vh]"
+            variant="sheet"
+            className="max-h-[70vh] h-full"
           />
         </MobileSheet>
       ) : null}

@@ -1,50 +1,50 @@
 import { useEffect, useRef, useState } from "react";
 import type { RoomEvent } from "../libs/rooms";
 
+type ChatEvent = Extract<RoomEvent, { type: "chat" }>;
+
 export function useUnreadChat(
-  events: RoomEvent[],
+  chatEvents: ChatEvent[],
   chatOpen: boolean,
   currentUserId: string | null,
   roomId: string,
 ) {
-  const previousCountRef = useRef(events.length);
+  const previousCountRef = useRef(chatEvents.length);
   const lastRoomRef = useRef(roomId);
   const [unread, setUnread] = useState(0);
 
   useEffect(() => {
     if (lastRoomRef.current !== roomId) {
       lastRoomRef.current = roomId;
-      previousCountRef.current = events.length;
+      previousCountRef.current = chatEvents.length;
       setUnread(0);
       return;
     }
-    if (events.length < previousCountRef.current) {
-      previousCountRef.current = events.length;
+    if (chatEvents.length < previousCountRef.current) {
+      previousCountRef.current = chatEvents.length;
     }
-  }, [events.length, roomId]);
+  }, [chatEvents.length, roomId]);
 
   useEffect(() => {
-    previousCountRef.current = events.length;
+    previousCountRef.current = chatEvents.length;
     setUnread(0);
   }, [currentUserId]);
 
   useEffect(() => {
     if (chatOpen) {
       setUnread(0);
-      previousCountRef.current = events.length;
+      previousCountRef.current = chatEvents.length;
       return;
     }
-    if (events.length > previousCountRef.current) {
-      const newEvents = events.slice(previousCountRef.current);
-      const additional = newEvents.filter(
-        (event) => event.type === "chat" && event.actorUid !== currentUserId,
-      ).length;
+    if (chatEvents.length > previousCountRef.current) {
+      const newEvents = chatEvents.slice(previousCountRef.current);
+      const additional = newEvents.filter((event) => event.actorUid !== currentUserId).length;
       if (additional > 0) {
         setUnread((count) => count + additional);
       }
-      previousCountRef.current = events.length;
+      previousCountRef.current = chatEvents.length;
     }
-  }, [events, chatOpen, currentUserId]);
+  }, [chatEvents, chatOpen, currentUserId]);
 
   return unread;
 }
