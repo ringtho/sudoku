@@ -1,12 +1,5 @@
 import type { Route } from "./+types/room.$roomId";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams } from "react-router";
 import { RequireAuth } from "../components/layout/RequireAuth";
 import { useSudokuGame, type NotesRecord, type SudokuSerializedState, indexToRowColumn } from "../hooks/useSudokuGame";
@@ -34,6 +27,7 @@ import { RoomChat } from "../components/chat/RoomChat";
 import { MatchTimeline } from "../components/timeline/MatchTimeline";
 import { ConfettiBurst } from "../components/effects/ConfettiBurst";
 import { usePreferences } from "../contexts/PreferencesContext";
+import { useUnreadChat } from "../hooks/useUnreadChat";
 
 export function meta({ params }: Route.MetaArgs) {
   return [
@@ -110,7 +104,6 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   const [hintsRemaining, setHintsRemaining] = useState(3);
   const [showMobileChat, setShowMobileChat] = useState(false);
   const [showMobileTimeline, setShowMobileTimeline] = useState(false);
-  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [rematchStatus, setRematchStatus] = useState<"idle" | "starting" | "error">("idle");
   const { preferences } = usePreferences();
   const pendingState = useRef<SudokuSerializedState | null>(null);
@@ -259,6 +252,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   }));
 
   const currentUserId = currentUser?.uid ?? null;
+  const unreadChatCount = useUnreadChat(events, showMobileChat, currentUserId, roomId);
   const currentMember = members.find((member) => member.uid === currentUserId) ?? null;
   const currentMemberColor = currentMember?.color;
 
@@ -327,7 +321,6 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
         actorUid: currentUser.uid,
         actorName: currentUser.displayName ?? currentUser.email ?? "Player",
       });
-      setUnreadChatCount(0);
     },
     [currentUser, roomId],
   );
@@ -670,7 +663,6 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
         type="button"
         onClick={() => {
           setShowMobileChat(true);
-          setUnreadChatCount(0);
         }}
         className="fixed bottom-5 right-5 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 lg:hidden"
         aria-label="Open chat"

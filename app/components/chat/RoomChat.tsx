@@ -69,10 +69,20 @@ export function RoomChat({
     const container = scrollRef.current;
     if (!container) return;
 
-    const isAtBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight < 64;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const isAtBottom = distanceFromBottom < 96;
+
     if (isAtBottom) {
-      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+      const scrollToBottom = () =>
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: chatEvents.length <= 1 ? "auto" : "smooth",
+        });
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(scrollToBottom);
+      } else {
+        scrollToBottom();
+      }
       setShowScrollHint(false);
     } else {
       setShowScrollHint(true);

@@ -1,9 +1,32 @@
 import { useEffect, useRef, useState } from "react";
 import type { RoomEvent } from "../libs/rooms";
 
-export function useUnreadChat(events: RoomEvent[], chatOpen: boolean, currentUserId: string | null) {
+export function useUnreadChat(
+  events: RoomEvent[],
+  chatOpen: boolean,
+  currentUserId: string | null,
+  roomId: string,
+) {
   const previousCountRef = useRef(events.length);
+  const lastRoomRef = useRef(roomId);
   const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    if (lastRoomRef.current !== roomId) {
+      lastRoomRef.current = roomId;
+      previousCountRef.current = events.length;
+      setUnread(0);
+      return;
+    }
+    if (events.length < previousCountRef.current) {
+      previousCountRef.current = events.length;
+    }
+  }, [events.length, roomId]);
+
+  useEffect(() => {
+    previousCountRef.current = events.length;
+    setUnread(0);
+  }, [currentUserId]);
 
   useEffect(() => {
     if (chatOpen) {
