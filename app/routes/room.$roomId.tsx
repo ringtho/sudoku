@@ -6,7 +6,7 @@ import { useSudokuGame, type NotesRecord, type SudokuSerializedState, indexToRow
 import { SudokuGamePanel } from "../components/sudoku/GamePanel";
 import { useAuth } from "../contexts/AuthContext";
 import { Button } from "../components/ui/button";
-import { Share2, X, MessageCircle } from "lucide-react";
+import { Share2, X, MessageCircle, Clock } from "lucide-react";
 import { useRoomRealtime } from "../hooks/useRoomRealtime";
 import {
   updateRoomState,
@@ -17,6 +17,7 @@ import {
   updateRoomStatus,
   saveRoomMatchSummary,
   markRoomMatchStarted,
+  pauseRoomMatch,
   startRoomRematch,
   type RoomDocument,
   type RoomMember,
@@ -161,12 +162,13 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   });
   const hasPersistedSummaryRef = useRef(Boolean(room.matchSummary));
   const persistSummaryInFlightRef = useRef(false);
-  const [liveStartMs, setLiveStartMs] = useState<number | null>(
-    room.activeMatchStartedAt ? room.activeMatchStartedAt.toMillis() : null,
-  );
-  const [liveDurationMs, setLiveDurationMs] = useState<number | null>(null);
   const summaryDurationMs = matchSummary?.durationMs ?? null;
   const timerAutoStartedRef = useRef(false);
+  const [timerStatus, setTimerStatus] = useState<"idle" | "running" | "paused" | "completed">("idle");
+  const [timerDisplayMs, setTimerDisplayMs] = useState<number>(0);
+  const [timerCatchUp, setTimerCatchUp] = useState(false);
+  const previousTimerStatusRef = useRef<"idle" | "running" | "paused" | "completed">("idle");
+  const displayDurationRef = useRef(0);
 
   const handleStatePersist = useCallback(
     (state: SudokuSerializedState) => {
@@ -230,13 +232,6 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   }, [room.matchSummary]);
 
   useEffect(() => {
-    if (!room.activeMatchStartedAt) return;
-    const startMs = room.activeMatchStartedAt.toMillis();
-    startTimeRef.current = startMs;
-    setLiveStartMs((previous) => (previous === startMs ? previous : startMs));
-  }, [room.activeMatchStartedAt]);
-
-  useEffect(() => {
     if (!matchSummary) return;
     if (room.matchSummary) return;
     if (hasPersistedSummaryRef.current || persistSummaryInFlightRef.current) return;
@@ -254,44 +249,83 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   }, [matchSummary, room.matchSummary, roomId]);
 
   useEffect(() => {
-    if (summaryDurationMs !== null) {
-      setLiveDurationMs((previous) => (previous === summaryDurationMs ? previous : summaryDurationMs));
+    const baseElapsed = typeof room.activeMatchElapsedMs === "number" ? room.activeMatchElapsedMs : 0;
+    const startedAtTimestamp = room.activeMatchStartedAt ? room.activeMatchStartedAt.toMillis() : null;
+
+    if (summaryDurationMs !== null && room.status === "completed") {
+      setTimerStatus("completed");
+      setTimerDisplayMs(summaryDurationMs);
+      displayDurationRef.current = summaryDurationMs;
       return;
     }
 
-    if (!liveStartMs || room.status === "waiting") {
-      setLiveDurationMs((previous) => (previous === null ? previous : null));
+    if (startedAtTimestamp) {
+      setTimerStatus("running");
+      startTimeRef.current = startedAtTimestamp;
+      const update = () => {
+        const next = baseElapsed + (Date.now() - startedAtTimestamp);
+        displayDurationRef.current = next;
+        setTimerDisplayMs((previous) => (previous === next ? previous : next));
+      };
+      update();
+      const intervalId = window.setInterval(update, 1000);
+      return () => {
+        window.clearInterval(intervalId);
+      };
+    }
+
+    if (baseElapsed > 0) {
+      setTimerStatus("paused");
+      setTimerDisplayMs(baseElapsed);
+      displayDurationRef.current = baseElapsed;
       return;
     }
 
-    const updateDuration = () => {
-      const next = Math.max(0, Date.now() - liveStartMs);
-      setLiveDurationMs((previous) => (previous === next ? previous : next));
-    };
+    if (room.status === "completed") {
+      setTimerStatus("completed");
+      setTimerDisplayMs(summaryDurationMs ?? baseElapsed);
+      displayDurationRef.current = summaryDurationMs ?? baseElapsed;
+      return;
+    }
 
-    updateDuration();
-    const intervalId = window.setInterval(updateDuration, 1000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [liveStartMs, room.status, summaryDurationMs]);
+    setTimerStatus(room.status === "waiting" ? "idle" : "paused");
+    setTimerDisplayMs(baseElapsed);
+    displayDurationRef.current = baseElapsed;
+  }, [room.activeMatchStartedAt, room.activeMatchElapsedMs, room.status, summaryDurationMs]);
 
   useEffect(() => {
+    const previous = previousTimerStatusRef.current;
+    if (timerStatus === "running" && previous !== "running") {
+      setTimerCatchUp(true);
+      const timeoutId = window.setTimeout(() => setTimerCatchUp(false), 900);
+      previousTimerStatusRef.current = timerStatus;
+      return () => {
+        window.clearTimeout(timeoutId);
+      };
+    }
+    previousTimerStatusRef.current = timerStatus;
+    if (timerStatus !== "running") {
+      setTimerCatchUp(false);
+    }
+  }, [timerStatus]);
+
+  useEffect(() => {
+    if (!currentUser) return;
     if (room.status === "completed") return;
-    if (room.activeMatchStartedAt) return;
+    if (room.activeMatchStartedAt || (room.activeMatchElapsedMs ?? 0) > 0) return;
     if (timerAutoStartedRef.current) return;
 
-    const now = Date.now();
     timerAutoStartedRef.current = true;
-    startTimeRef.current = now;
-    setLiveStartMs(now);
-    setLiveDurationMs(0);
-    markRoomMatchStarted(roomId).catch((error) => {
+    startTimeRef.current = Date.now();
+    markRoomMatchStarted(roomId, {
+      actorUid: currentUser.uid,
+      actorName: currentUser.displayName ?? currentUser.email ?? "Player",
+      resetElapsed: true,
+    }).catch((error) => {
       console.error("Failed to mark match start", error);
       timerAutoStartedRef.current = false;
     });
-  }, [room.activeMatchStartedAt, room.status, roomId]);
+  }, [currentUser, room.activeMatchStartedAt, room.activeMatchElapsedMs, room.status, roomId]);
 
   const game = useSudokuGame({
     puzzle: room.puzzle,
@@ -320,18 +354,16 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
 
       if (!hasActivated.current && nextValue !== null) {
         hasActivated.current = true;
-        if (liveStartMs === null) {
-          const now = Date.now();
-          startTimeRef.current = now;
-          setLiveStartMs(now);
-          setLiveDurationMs(0);
-        } else {
-          startTimeRef.current = liveStartMs;
-        }
+        const shouldResetElapsed = (room.activeMatchElapsedMs ?? 0) <= 0;
         if (!room.activeMatchStartedAt) {
-          markRoomMatchStarted(roomId).catch((error) =>
-            console.error("Failed to mark match start", error),
-          );
+          markRoomMatchStarted(roomId, {
+            actorUid: currentUser.uid,
+            actorName: currentUser.displayName ?? currentUser.email ?? "Player",
+            resetElapsed: shouldResetElapsed,
+          }).catch((error) => console.error("Failed to mark match start", error));
+          startTimeRef.current = Date.now();
+        } else {
+          startTimeRef.current = room.activeMatchStartedAt.toMillis();
         }
         streakRef.current = 0;
         bestStreakRef.current = 0;
@@ -381,8 +413,57 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     },
   });
 
-  const timerIsRunning = room.status === "active" && !game.isComplete && liveDurationMs !== null;
-  const elapsedForDisplay = summaryDurationMs ?? liveDurationMs;
+  const elapsedForDisplay = summaryDurationMs ?? timerDisplayMs;
+  const isTimerRunning = timerStatus === "running";
+  const timerStartedByName = room.activeMatchStartedByName;
+  const timerInitialStartedAt = room.activeMatchInitialStartedAt
+    ? room.activeMatchInitialStartedAt.toDate()
+    : null;
+  const timerPausedAt = room.activeMatchPausedAt ? room.activeMatchPausedAt.toDate() : null;
+
+  const timerSubtitleText = useMemo(() => {
+    if (timerStatus === "paused" && (room.activeMatchElapsedMs ?? 0) > 0) {
+      if (timerPausedAt) {
+        const pausedLabel = timerPausedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        return `Paused at ${pausedLabel} — resume when someone makes a move.`;
+      }
+      return "Paused—resume when someone makes a move.";
+    }
+    if (timerStatus === "running" || timerStatus === "idle") {
+      const timeLabel = timerInitialStartedAt
+        ? timerInitialStartedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : null;
+      if (timerStartedByName && timeLabel) {
+        return `Started by ${timerStartedByName} at ${timeLabel}`;
+      }
+      if (timerStartedByName) {
+        return `Started by ${timerStartedByName}`;
+      }
+      if (timeLabel) {
+        return `Started at ${timeLabel}`;
+      }
+    }
+    if (timerStatus === "completed" && matchSummary?.durationMs !== null) {
+      const completedAt = room.matchSummary?.completedAt?.toDate();
+      if (completedAt) {
+        const completedLabel = completedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        return `Finished at ${completedLabel}`;
+      }
+    }
+    return null;
+  }, [
+    timerStatus,
+    timerStartedByName,
+    timerInitialStartedAt,
+    timerPausedAt,
+    room.activeMatchElapsedMs,
+    matchSummary?.durationMs,
+    room.matchSummary?.completedAt,
+  ]);
+
+  const bestDurationMs = typeof room.bestMatchDurationMs === "number" ? room.bestMatchDurationMs : null;
+  const isNewPersonalBest =
+    bestDurationMs !== null && summaryDurationMs !== null && bestDurationMs === summaryDurationMs;
 
   const peers = members.map((member) => ({
     id: member.uid,
@@ -435,6 +516,19 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       );
     };
   }, [currentMemberColor, currentUser, roomId]);
+
+  useEffect(() => {
+    return () => {
+      timerAutoStartedRef.current = false;
+      if (room.status === "completed") return;
+      const otherMembers = members.filter((member) => member.uid !== currentUserId);
+      if (otherMembers.length === 0 && (room.activeMatchStartedAt || (room.activeMatchElapsedMs ?? 0) > 0)) {
+        pauseRoomMatch(roomId, displayDurationRef.current).catch((error) =>
+          console.error("Failed to pause match timer", error),
+        );
+      }
+    };
+  }, [members, currentUserId, room.activeMatchStartedAt, room.activeMatchElapsedMs, room.status, roomId]);
 
   const roomShareUrl =
     typeof window !== "undefined" ? window.location.href : `https://sudoku.local/room/${roomId}`;
@@ -547,8 +641,10 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       statusRef.current = "waiting";
       hasActivated.current = false;
       setMatchSummary(null);
-      setLiveStartMs(null);
-      setLiveDurationMs(null);
+      setTimerStatus("idle");
+      setTimerDisplayMs(0);
+      displayDurationRef.current = 0;
+      setTimerCatchUp(false);
       timerAutoStartedRef.current = false;
     } catch (error) {
       console.error("Failed to start rematch", error);
@@ -588,8 +684,10 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     startTimeRef.current = Date.now();
     completedDurationRef.current = null;
     setMatchSummary(null);
-    setLiveStartMs(null);
-    setLiveDurationMs(null);
+    setTimerStatus(room.status === "completed" ? "completed" : "idle");
+    setTimerDisplayMs(0);
+    displayDurationRef.current = 0;
+    setTimerCatchUp(false);
     timerAutoStartedRef.current = false;
   }, [roomId, room.status]);
 
@@ -753,6 +851,31 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
         </div>
       </header>
 
+      <div className="sticky top-16 z-30 flex items-center justify-between rounded-full border border-blue-100/70 bg-white/90 px-3 py-2 text-xs shadow-sm ring-1 ring-black/5 backdrop-blur dark:border-blue-500/20 dark:bg-slate-950/80 dark:ring-white/10 lg:hidden">
+        <div className="flex items-center gap-2 font-semibold text-gray-800 dark:text-gray-100">
+          <Clock className="h-4 w-4 text-blue-500 dark:text-blue-300" aria-hidden="true" />
+          <span className={`font-mono text-base tracking-tight ${timerCatchUp ? "animate-[pulse_1s_ease-in-out]" : ""}`}>
+            {formatDuration(elapsedForDisplay)}
+          </span>
+          {isTimerRunning ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-200">
+              <span className="h-1 w-1 animate-pulse rounded-full bg-emerald-500 dark:bg-emerald-300" aria-hidden="true" />
+              Live
+            </span>
+          ) : null}
+          {timerStatus === "paused" && elapsedForDisplay > 0 ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:bg-amber-400/10 dark:text-amber-200">
+              Paused
+            </span>
+          ) : null}
+        </div>
+        {timerSubtitleText ? (
+          <span className="ml-3 max-w-[55%] truncate text-[11px] font-medium text-blue-600/80 dark:text-blue-200/80">
+            {timerSubtitleText}
+          </span>
+        ) : null}
+      </div>
+
       <section className="hidden gap-6 items-start lg:grid lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
         <div className="space-y-6">
           <SudokuGamePanel
@@ -764,7 +887,9 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
             showPresenceBadges={preferences.showPresenceBadges}
             allowHints={preferences.allowHints}
             elapsedMs={elapsedForDisplay}
-            isTimerRunning={timerIsRunning}
+            timerStatus={timerStatus}
+            timerSubtitle={timerSubtitleText}
+            timerCatchUp={timerCatchUp}
           />
           <MatchTimeline events={events} members={members} />
         </div>
@@ -799,7 +924,9 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
           showPresenceBadges={preferences.showPresenceBadges}
           allowHints={preferences.allowHints}
           elapsedMs={elapsedForDisplay}
-          isTimerRunning={timerIsRunning}
+          timerStatus={timerStatus}
+          timerSubtitle={timerSubtitleText}
+          timerCatchUp={timerCatchUp}
         />
         <div className="flex gap-3">
           <Button className="flex-1" variant="outline" onClick={() => setShowMobileTimeline(true)}>
@@ -823,6 +950,8 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
           correctMoves={matchSummary.correctMoves}
           bestStreak={matchSummary.bestStreak}
           hintsUsed={matchSummary.hintsUsed}
+          bestDurationMs={bestDurationMs}
+          isNewPersonalBest={isNewPersonalBest}
           onRematch={handleRematch}
           rematchStatus={rematchStatus}
         />
@@ -978,11 +1107,24 @@ type MatchSummaryProps = {
   correctMoves: number;
   bestStreak: number;
   hintsUsed: number | null;
+  bestDurationMs: number | null;
+  isNewPersonalBest: boolean;
   onRematch: () => void;
   rematchStatus: "idle" | "starting" | "error";
 };
 
-function MatchSummary({ durationMs, correctMoves, bestStreak, hintsUsed, onRematch, rematchStatus }: MatchSummaryProps) {
+function MatchSummary({
+  durationMs,
+  correctMoves,
+  bestStreak,
+  hintsUsed,
+  bestDurationMs,
+  isNewPersonalBest,
+  onRematch,
+  rematchStatus,
+}: MatchSummaryProps) {
+  const personalBestValue = bestDurationMs !== null ? formatDuration(bestDurationMs) : "—";
+  const latestDurationValue = formatDuration(durationMs);
   return (
     <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
       <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1001,8 +1143,18 @@ function MatchSummary({ durationMs, correctMoves, bestStreak, hintsUsed, onRemat
           </Button>
         </div>
       </header>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <SummaryCard label="Duration" value={formatDuration(durationMs)} />
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <SummaryCard
+          label="Latest run"
+          value={latestDurationValue}
+          helper={isNewPersonalBest ? "New personal best!" : null}
+          highlight={isNewPersonalBest}
+        />
+        <SummaryCard
+          label="Personal best"
+          value={personalBestValue}
+          helper={bestDurationMs !== null ? "All-time fastest solve" : null}
+        />
         <SummaryCard label="Correct moves" value={`${correctMoves}`} />
         <SummaryCard label="Best streak" value={`${bestStreak}`} />
         <SummaryCard label="Hints used" value={hintsUsed === null ? "—" : `${hintsUsed}`} />
@@ -1017,13 +1169,24 @@ function MatchSummary({ durationMs, correctMoves, bestStreak, hintsUsed, onRemat
 type SummaryCardProps = {
   label: string;
   value: string;
+  helper?: string | null;
+  highlight?: boolean;
 };
 
-function SummaryCard({ label, value }: SummaryCardProps) {
+function SummaryCard({ label, value, helper, highlight = false }: SummaryCardProps) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm dark:border-gray-800 dark:bg-gray-900/70">
+    <div
+      className={`rounded-2xl border px-4 py-3 text-sm transition dark:bg-gray-900/70 ${
+        highlight
+          ? "border-emerald-200 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10"
+          : "border-gray-100 bg-gray-50 dark:border-gray-800"
+      }`}
+    >
       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p>
       <p className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">{value}</p>
+      {helper ? (
+        <p className="mt-1 text-[11px] font-medium text-gray-500 dark:text-gray-400">{helper}</p>
+      ) : null}
     </div>
   );
 }

@@ -34,10 +34,6 @@ export type RoomMatchSummary = {
   completedAt: Timestamp | null;
 };
 
-export type RoomCurrentMatch = {
-  startedAt: Timestamp | null;
-};
-
 export type RoomDocument = {
   id: string;
   name: string;
@@ -54,7 +50,13 @@ export type RoomDocument = {
   notes: NotesRecord;
   allowedUids: string[];
   matchSummary: RoomMatchSummary | null;
+  bestMatchDurationMs: number | null;
   activeMatchStartedAt: Timestamp | null;
+  activeMatchInitialStartedAt: Timestamp | null;
+  activeMatchStartedByUid: string | null;
+  activeMatchStartedByName: string | null;
+  activeMatchElapsedMs: number;
+  activeMatchPausedAt: Timestamp | null;
 };
 
 export type RoomMember = {
@@ -126,7 +128,13 @@ export async function createRoom({ name, difficulty, ownerUid, ownerName, ownerC
     notes: {},
     allowedUids: [ownerUid],
     matchSummary: null,
+    bestMatchDurationMs: null,
     activeMatchStartedAt: null,
+    activeMatchInitialStartedAt: null,
+    activeMatchStartedByUid: null,
+    activeMatchStartedByName: null,
+    activeMatchElapsedMs: 0,
+    activeMatchPausedAt: null,
   });
 
   const memberRef = doc(membersCollection(db, roomRef.id), ownerUid);
@@ -161,24 +169,61 @@ export type RoomMatchSummaryInput = {
 export async function saveRoomMatchSummary(roomId: string, summary: RoomMatchSummaryInput) {
   const { db } = getFirebase();
   const docRef = roomDoc(db, roomId);
-  await updateDoc(docRef, {
-    matchSummary: {
-      durationMs: summary.durationMs,
-      correctMoves: summary.correctMoves,
-      bestStreak: summary.bestStreak,
-      hintsUsed: summary.hintsUsed,
-      completedAt: serverTimestamp(),
-    },
-    updatedAt: serverTimestamp(),
-    activeMatchStartedAt: null,
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(docRef);
+    if (!snapshot.exists()) return;
+    const data = snapshot.data() as Partial<RoomDocument>;
+    const previousBest = typeof data.bestMatchDurationMs === "number" ? data.bestMatchDurationMs : null;
+    const nextBest =
+      summary.durationMs !== null
+        ? previousBest === null
+          ? summary.durationMs
+          : Math.min(previousBest, summary.durationMs)
+        : previousBest;
+
+    transaction.update(docRef, {
+      matchSummary: {
+        durationMs: summary.durationMs,
+        correctMoves: summary.correctMoves,
+        bestStreak: summary.bestStreak,
+        hintsUsed: summary.hintsUsed,
+        completedAt: serverTimestamp(),
+      },
+      bestMatchDurationMs: nextBest ?? null,
+      activeMatchStartedAt: null,
+      activeMatchInitialStartedAt: null,
+      activeMatchStartedByUid: null,
+      activeMatchStartedByName: null,
+      activeMatchElapsedMs: summary.durationMs ?? data.activeMatchElapsedMs ?? 0,
+      activeMatchPausedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
   });
 }
 
-export async function markRoomMatchStarted(roomId: string) {
+export async function markRoomMatchStarted(
+  roomId: string,
+  data: { actorUid?: string; actorName?: string; resetElapsed?: boolean } = {},
+) {
   const { db } = getFirebase();
   const docRef = roomDoc(db, roomId);
   await updateDoc(docRef, {
     activeMatchStartedAt: serverTimestamp(),
+    ...(data.resetElapsed ? { activeMatchInitialStartedAt: serverTimestamp(), activeMatchElapsedMs: 0 } : {}),
+    activeMatchStartedByUid: data.actorUid ?? null,
+    activeMatchStartedByName: data.actorName ?? null,
+    activeMatchPausedAt: null,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function pauseRoomMatch(roomId: string, elapsedMs: number) {
+  const { db } = getFirebase();
+  const docRef = roomDoc(db, roomId);
+  await updateDoc(docRef, {
+    activeMatchStartedAt: null,
+    activeMatchPausedAt: serverTimestamp(),
+    activeMatchElapsedMs: Math.max(0, Math.floor(elapsedMs)),
     updatedAt: serverTimestamp(),
   });
 }
@@ -437,6 +482,11 @@ export async function startRoomRematch(
     updatedAt: serverTimestamp(),
     matchSummary: null,
     activeMatchStartedAt: null,
+    activeMatchInitialStartedAt: null,
+    activeMatchStartedByUid: null,
+    activeMatchStartedByName: null,
+    activeMatchElapsedMs: 0,
+    activeMatchPausedAt: null,
   });
 
   await addDoc(eventsCollection(db, roomId), {
@@ -468,7 +518,13 @@ function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
       notes: {},
       allowedUids: [],
       matchSummary: null,
+      bestMatchDurationMs: null,
       activeMatchStartedAt: null,
+      activeMatchInitialStartedAt: null,
+      activeMatchStartedByUid: null,
+      activeMatchStartedByName: null,
+      activeMatchElapsedMs: 0,
+      activeMatchPausedAt: null,
     } satisfies RoomDocument;
   }
 
@@ -506,7 +562,20 @@ function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
     notes: (data.notes as NotesRecord | undefined) ?? {},
     allowedUids,
     matchSummary,
+    bestMatchDurationMs:
+      typeof data.bestMatchDurationMs === "number" ? data.bestMatchDurationMs : null,
     activeMatchStartedAt:
       data.activeMatchStartedAt instanceof Timestamp ? (data.activeMatchStartedAt as Timestamp) : null,
+    activeMatchInitialStartedAt:
+      data.activeMatchInitialStartedAt instanceof Timestamp
+        ? (data.activeMatchInitialStartedAt as Timestamp)
+        : null,
+    activeMatchStartedByUid:
+      typeof data.activeMatchStartedByUid === "string" ? data.activeMatchStartedByUid : null,
+    activeMatchStartedByName:
+      typeof data.activeMatchStartedByName === "string" ? data.activeMatchStartedByName : null,
+    activeMatchElapsedMs: typeof data.activeMatchElapsedMs === "number" ? data.activeMatchElapsedMs : 0,
+    activeMatchPausedAt:
+      data.activeMatchPausedAt instanceof Timestamp ? (data.activeMatchPausedAt as Timestamp) : null,
   } satisfies RoomDocument;
 }

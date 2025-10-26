@@ -16,7 +16,9 @@ type SudokuGamePanelProps = {
   showPresenceBadges?: boolean;
   allowHints?: boolean;
   elapsedMs?: number | null;
-  isTimerRunning?: boolean;
+  timerStatus?: "idle" | "running" | "paused" | "completed";
+  timerSubtitle?: string | null;
+  timerCatchUp?: boolean;
 };
 
 export function SudokuGamePanel({
@@ -29,7 +31,9 @@ export function SudokuGamePanel({
   showPresenceBadges = true,
   allowHints = true,
   elapsedMs = null,
-  isTimerRunning = false,
+  timerStatus = "idle",
+  timerSubtitle = null,
+  timerCatchUp = false,
 }: SudokuGamePanelProps) {
   const {
     board,
@@ -101,24 +105,39 @@ export function SudokuGamePanel({
   return (
     <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
       <div className="flex flex-col items-center gap-6">
-        <div className="w-full">
-          <div className="flex items-center justify-between rounded-2xl border border-blue-100/80 bg-gradient-to-r from-blue-50 via-white to-purple-50 px-4 py-3 text-sm shadow-sm ring-1 ring-black/5 dark:border-blue-500/20 dark:bg-gradient-to-r dark:from-slate-950 dark:via-slate-950/80 dark:to-purple-950/40 dark:ring-white/5">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">
-              <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Match time</span>
-              {isTimerRunning ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-300">
-                  <span
-                    className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500 dark:bg-emerald-300"
-                    aria-hidden="true"
-                  />
-                  Live
-                </span>
-              ) : null}
+        <div className="hidden w-full lg:block">
+          <div className="flex flex-col gap-1 rounded-2xl border border-blue-100/80 bg-gradient-to-r from-blue-50 via-white to-purple-50 px-5 py-4 text-sm shadow-sm ring-1 ring-black/5 dark:border-blue-500/20 dark:bg-gradient-to-r dark:from-slate-950 dark:via-slate-950/80 dark:to-purple-950/40 dark:ring-white/5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">
+                <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Match time</span>
+                {timerStatus === "running" ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-300">
+                    <span
+                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500 dark:bg-emerald-300"
+                      aria-hidden="true"
+                    />
+                    Live
+                  </span>
+                ) : null}
+                {timerStatus === "paused" && elapsedMs ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:bg-amber-400/10 dark:text-amber-200">
+                    Paused
+                  </span>
+                ) : null}
+              </div>
+              <span
+                className={`font-mono text-2xl font-semibold tracking-tight text-gray-900 transition dark:text-gray-100 ${
+                  timerCatchUp ? "animate-[pulse_1s_ease-in-out]" : ""
+                }`}
+                aria-live="polite"
+              >
+                {elapsedMs !== null ? formatDuration(elapsedMs) : "—"}
+              </span>
             </div>
-            <span className="font-mono text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">
-              {elapsedMs !== null ? formatDuration(elapsedMs) : "—"}
-            </span>
+            {timerSubtitle ? (
+              <p className="text-[11px] font-medium text-blue-700/70 dark:text-blue-300/70">{timerSubtitle}</p>
+            ) : null}
           </div>
         </div>
         <SudokuBoardView
