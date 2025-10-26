@@ -15,11 +15,13 @@ import {
   sendRoomMove,
   sendRoomSystemEvent,
   updateRoomStatus,
+  saveRoomMatchSummary,
   startRoomRematch,
   type RoomDocument,
   type RoomMember,
   type RoomEvent,
   type RoomStatus,
+  type RoomMatchSummaryInput,
 } from "../libs/rooms";
 import { boardToString } from "../libs/sudoku";
 import type { User } from "firebase/auth";
@@ -143,12 +145,20 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   const sharedCellNotificationRef = useRef<Map<number, number>>(new Map());
   const startTimeRef = useRef<number>(Date.now());
   const completedDurationRef = useRef<number | null>(null);
-  const [matchSummary, setMatchSummary] = useState<{
-    durationMs: number | null;
-    correctMoves: number;
-    bestStreak: number;
-    hintsUsed: number | null;
-  } | null>(null);
+  const previousRoomIdRef = useRef<string>(roomId);
+  const previousStatusRef = useRef<RoomStatus>(room.status);
+  const [matchSummary, setMatchSummary] = useState<RoomMatchSummaryInput | null>(() => {
+    const summary = room.matchSummary;
+    if (!summary) return null;
+    return {
+      durationMs: summary.durationMs ?? null,
+      correctMoves: typeof summary.correctMoves === "number" ? summary.correctMoves : 0,
+      bestStreak: typeof summary.bestStreak === "number" ? summary.bestStreak : 0,
+      hintsUsed: typeof summary.hintsUsed === "number" ? summary.hintsUsed : null,
+    };
+  });
+  const hasPersistedSummaryRef = useRef(Boolean(room.matchSummary));
+  const persistSummaryInFlightRef = useRef(false);
 
   const handleStatePersist = useCallback(
     (state: SudokuSerializedState) => {
@@ -183,6 +193,50 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       }
     };
   }, [roomId]);
+
+  useEffect(() => {
+    const summary = room.matchSummary;
+    hasPersistedSummaryRef.current = Boolean(summary);
+    if (!summary) {
+      setMatchSummary((previous) => (previous === null ? previous : null));
+      return;
+    }
+    const normalized: RoomMatchSummaryInput = {
+      durationMs: summary.durationMs ?? null,
+      correctMoves: typeof summary.correctMoves === "number" ? summary.correctMoves : 0,
+      bestStreak: typeof summary.bestStreak === "number" ? summary.bestStreak : 0,
+      hintsUsed: typeof summary.hintsUsed === "number" ? summary.hintsUsed : null,
+    };
+    setMatchSummary((previous) => {
+      if (
+        previous &&
+        previous.durationMs === normalized.durationMs &&
+        previous.correctMoves === normalized.correctMoves &&
+        previous.bestStreak === normalized.bestStreak &&
+        previous.hintsUsed === normalized.hintsUsed
+      ) {
+        return previous;
+      }
+      return normalized;
+    });
+  }, [room.matchSummary]);
+
+  useEffect(() => {
+    if (!matchSummary) return;
+    if (room.matchSummary) return;
+    if (hasPersistedSummaryRef.current || persistSummaryInFlightRef.current) return;
+    persistSummaryInFlightRef.current = true;
+    (async () => {
+      try {
+        await saveRoomMatchSummary(roomId, matchSummary);
+        hasPersistedSummaryRef.current = true;
+      } catch (error) {
+        console.error("Failed to persist match summary", error);
+      } finally {
+        persistSummaryInFlightRef.current = false;
+      }
+    })();
+  }, [matchSummary, room.matchSummary, roomId]);
 
   const game = useSudokuGame({
     puzzle: room.puzzle,
@@ -430,13 +484,27 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   }, [currentUser, room.difficulty, roomId]);
 
   useEffect(() => {
+    const previousRoomId = previousRoomIdRef.current;
+    const previousStatus = previousStatusRef.current;
+    const roomChanged = roomId !== previousRoomId;
+    const statusChanged = room.status !== previousStatus;
+    const shouldReset = roomChanged || (statusChanged && room.status !== "completed");
+
+    previousRoomIdRef.current = roomId;
+    previousStatusRef.current = room.status;
+    statusRef.current = room.status;
+
+    if (!shouldReset) {
+      return;
+    }
+
+    hasPersistedSummaryRef.current = Boolean(room.matchSummary);
     setHintsRemaining(3);
     hasCelebrated.current = false;
     lastMoveActor.current = null;
     lastMoveActorName.current = null;
     lastMoveIndex.current = null;
     lastMoveWasCorrect.current = false;
-    statusRef.current = room.status;
     streakRef.current = 0;
     bestStreakRef.current = 0;
     totalCorrectRef.current = 0;
@@ -475,12 +543,14 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       if (!completedDurationRef.current) {
         completedDurationRef.current = Date.now() - startTimeRef.current;
       }
-      setMatchSummary({
+      const hintsUsedValue = preferences.allowHints ? Math.max(0, 3 - hintsRemaining) : null;
+      const summaryPayload: RoomMatchSummaryInput = {
         durationMs: completedDurationRef.current,
         correctMoves: totalCorrectRef.current,
         bestStreak: bestStreakRef.current,
-        hintsUsed: preferences.allowHints ? Math.max(0, 3 - hintsRemaining) : null,
-      });
+        hintsUsed: hintsUsedValue,
+      };
+      setMatchSummary(summaryPayload);
       setShowConfetti(true);
       celebrationTimeout.current = window.setTimeout(() => {
         setShowConfetti(false);

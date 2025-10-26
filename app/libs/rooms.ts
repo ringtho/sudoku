@@ -16,7 +16,7 @@ import {
   type Firestore,
   type Unsubscribe,
   type DocumentSnapshot,
-  type Timestamp,
+  Timestamp,
   type QueryConstraint,
   type FirestoreError,
 } from "firebase/firestore";
@@ -25,6 +25,14 @@ import { generateSudoku, type Difficulty } from "./sudoku";
 import type { NotesRecord, SudokuSerializedState } from "../hooks/useSudokuGame";
 
 export type RoomStatus = "waiting" | "active" | "completed";
+
+export type RoomMatchSummary = {
+  durationMs: number | null;
+  correctMoves: number;
+  bestStreak: number;
+  hintsUsed: number | null;
+  completedAt: Timestamp | null;
+};
 
 export type RoomDocument = {
   id: string;
@@ -41,6 +49,7 @@ export type RoomDocument = {
   board: string;
   notes: NotesRecord;
   allowedUids: string[];
+  matchSummary: RoomMatchSummary | null;
 };
 
 export type RoomMember = {
@@ -111,6 +120,7 @@ export async function createRoom({ name, difficulty, ownerUid, ownerName, ownerC
     board: puzzle,
     notes: {},
     allowedUids: [ownerUid],
+    matchSummary: null,
   });
 
   const memberRef = doc(membersCollection(db, roomRef.id), ownerUid);
@@ -131,6 +141,28 @@ export async function updateRoomState(roomId: string, state: SudokuSerializedSta
   await updateDoc(docRef, {
     board: state.board,
     notes: state.notes,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export type RoomMatchSummaryInput = {
+  durationMs: number | null;
+  correctMoves: number;
+  bestStreak: number;
+  hintsUsed: number | null;
+};
+
+export async function saveRoomMatchSummary(roomId: string, summary: RoomMatchSummaryInput) {
+  const { db } = getFirebase();
+  const docRef = roomDoc(db, roomId);
+  await updateDoc(docRef, {
+    matchSummary: {
+      durationMs: summary.durationMs,
+      correctMoves: summary.correctMoves,
+      bestStreak: summary.bestStreak,
+      hintsUsed: summary.hintsUsed,
+      completedAt: serverTimestamp(),
+    },
     updatedAt: serverTimestamp(),
   });
 }
@@ -387,6 +419,7 @@ export async function startRoomRematch(
     notes: {},
     status: "waiting" satisfies RoomStatus,
     updatedAt: serverTimestamp(),
+    matchSummary: null,
   });
 
   await addDoc(eventsCollection(db, roomId), {
@@ -400,7 +433,7 @@ export async function startRoomRematch(
 }
 
 function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
-  const data = snapshot.data() as Omit<RoomDocument, "id"> | undefined;
+  const data = snapshot.data() as Partial<Omit<RoomDocument, "id">> | undefined;
   if (!data) {
     return {
       id: snapshot.id,
@@ -417,13 +450,43 @@ function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
       ownerColor: undefined,
       notes: {},
       allowedUids: [],
+      matchSummary: null,
     } satisfies RoomDocument;
   }
+
+  const ownerUid = typeof data.ownerUid === "string" ? data.ownerUid : "";
+  const allowedUids = Array.isArray(data.allowedUids) ? (data.allowedUids as string[]) : [ownerUid];
+  const rawSummary = data.matchSummary as RoomMatchSummary | null | undefined;
+  const matchSummary: RoomMatchSummary | null = rawSummary
+    ? {
+        durationMs: typeof rawSummary.durationMs === "number" ? rawSummary.durationMs : null,
+        correctMoves: typeof rawSummary.correctMoves === "number" ? rawSummary.correctMoves : 0,
+        bestStreak: typeof rawSummary.bestStreak === "number" ? rawSummary.bestStreak : 0,
+        hintsUsed:
+          typeof rawSummary.hintsUsed === "number"
+            ? rawSummary.hintsUsed
+            : rawSummary.hintsUsed === null
+              ? null
+              : null,
+        completedAt: rawSummary.completedAt instanceof Timestamp ? rawSummary.completedAt : null,
+      }
+    : null;
+
   return {
     id: snapshot.id,
-    ...data,
-    ownerName: data.ownerName ?? "",
-    ownerColor: data.ownerColor,
-    allowedUids: data.allowedUids ?? [data.ownerUid],
+    name: typeof data.name === "string" ? data.name : "Untitled",
+    ownerUid,
+    ownerName: typeof data.ownerName === "string" ? data.ownerName : "",
+    ownerColor: typeof data.ownerColor === "string" ? data.ownerColor : undefined,
+    difficulty: (data.difficulty as Difficulty) ?? "medium",
+    status: (data.status as RoomStatus) ?? "waiting",
+    createdAt: (data.createdAt as Timestamp | null | undefined) ?? null,
+    updatedAt: (data.updatedAt as Timestamp | null | undefined) ?? null,
+    puzzle: typeof data.puzzle === "string" ? data.puzzle : "".padEnd(81, "."),
+    solution: typeof data.solution === "string" ? data.solution : "".padEnd(81, "1"),
+    board: typeof data.board === "string" ? data.board : "".padEnd(81, "."),
+    notes: (data.notes as NotesRecord | undefined) ?? {},
+    allowedUids,
+    matchSummary,
   } satisfies RoomDocument;
 }

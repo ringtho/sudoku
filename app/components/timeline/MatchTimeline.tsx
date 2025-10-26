@@ -38,11 +38,15 @@ export function MatchTimeline({ events, members }: MatchTimelineProps) {
     const totals = { moves: 0, correct: 0, mistakes: 0 };
 
     moveEvents.forEach((event) => {
+      if (event.value === null) {
+        return;
+      }
+
       totals.moves += 1;
-      if (event.value !== null && event.correct) {
+      if (event.correct) {
         totals.correct += 1;
-        solvedCells.add(`${event.cellIndex}-${event.actorUid}`);
-      } else if (event.value !== null && !event.correct) {
+        solvedCells.add(String(event.cellIndex));
+      } else {
         totals.mistakes += 1;
       }
 
