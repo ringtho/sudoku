@@ -4,6 +4,8 @@ import {
   arrayUnion,
   collection,
   doc,
+  getDoc,
+  getDocs,
   limit,
   onSnapshot,
   orderBy,
@@ -21,6 +23,7 @@ import {
   type FirestoreError,
 } from "firebase/firestore";
 import { getFirebase } from "./firebase";
+import { getProfilesByUids, type UserProfile } from "./profiles";
 import { generateSudoku, type Difficulty } from "./sudoku";
 import type { NotesRecord, SudokuSerializedState } from "../hooks/useSudokuGame";
 
@@ -67,6 +70,56 @@ export type RoomMember = {
   lastActive: Timestamp | null;
   isTyping?: boolean;
 };
+
+export type RecentCollaborator = {
+  uid: string;
+  roomId: string;
+  roomName: string;
+  lastActive: Timestamp | null;
+};
+
+export async function getRecentCollaborators(viewerUid: string, limitTo = 6): Promise<RecentCollaborator[]> {
+  const { db } = getFirebase();
+  const roomsSnapshot = await getDocs(
+    query(roomsCollection(db), where("allowedUids", "array-contains", viewerUid), limit(40)),
+  );
+  const entries: RecentCollaborator[] = [];
+  await Promise.all(
+    roomsSnapshot.docs.map(async (roomDocSnap) => {
+      const roomData = roomDocSnap.data() as RoomDocument;
+      const membersSnapshot = await getDocs(membersCollection(db, roomDocSnap.id));
+      membersSnapshot.forEach((memberDocSnap) => {
+        const member = memberDocSnap.data() as Omit<RoomMember, "uid">;
+        const memberUid = memberDocSnap.id;
+        if (memberUid === viewerUid) return;
+        const key = `${memberUid}-${roomDocSnap.id}`;
+        const lastActive = member.lastActive ?? roomData.updatedAt ?? null;
+        entries.push({
+          uid: memberUid,
+          roomId: roomDocSnap.id,
+          roomName: roomData.name,
+          lastActive,
+        });
+      });
+    }),
+  );
+
+  entries.sort((a, b) => {
+    const aTime = a.lastActive ? a.lastActive.toMillis() : 0;
+    const bTime = b.lastActive ? b.lastActive.toMillis() : 0;
+    return bTime - aTime;
+  });
+
+  const uniqueByUid = new Map<string, RecentCollaborator>();
+  for (const entry of entries) {
+    if (!uniqueByUid.has(entry.uid)) {
+      uniqueByUid.set(entry.uid, entry);
+    }
+    if (uniqueByUid.size >= limitTo * 3) break;
+  }
+
+  return Array.from(uniqueByUid.values()).slice(0, limitTo);
+}
 
 export type CreateRoomInput = {
   name: string;
