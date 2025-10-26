@@ -34,6 +34,10 @@ export type RoomMatchSummary = {
   completedAt: Timestamp | null;
 };
 
+export type RoomCurrentMatch = {
+  startedAt: Timestamp | null;
+};
+
 export type RoomDocument = {
   id: string;
   name: string;
@@ -50,6 +54,7 @@ export type RoomDocument = {
   notes: NotesRecord;
   allowedUids: string[];
   matchSummary: RoomMatchSummary | null;
+  activeMatchStartedAt: Timestamp | null;
 };
 
 export type RoomMember = {
@@ -121,6 +126,7 @@ export async function createRoom({ name, difficulty, ownerUid, ownerName, ownerC
     notes: {},
     allowedUids: [ownerUid],
     matchSummary: null,
+    activeMatchStartedAt: null,
   });
 
   const memberRef = doc(membersCollection(db, roomRef.id), ownerUid);
@@ -163,6 +169,16 @@ export async function saveRoomMatchSummary(roomId: string, summary: RoomMatchSum
       hintsUsed: summary.hintsUsed,
       completedAt: serverTimestamp(),
     },
+    updatedAt: serverTimestamp(),
+    activeMatchStartedAt: null,
+  });
+}
+
+export async function markRoomMatchStarted(roomId: string) {
+  const { db } = getFirebase();
+  const docRef = roomDoc(db, roomId);
+  await updateDoc(docRef, {
+    activeMatchStartedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
 }
@@ -420,6 +436,7 @@ export async function startRoomRematch(
     status: "waiting" satisfies RoomStatus,
     updatedAt: serverTimestamp(),
     matchSummary: null,
+    activeMatchStartedAt: null,
   });
 
   await addDoc(eventsCollection(db, roomId), {
@@ -451,6 +468,7 @@ function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
       notes: {},
       allowedUids: [],
       matchSummary: null,
+      activeMatchStartedAt: null,
     } satisfies RoomDocument;
   }
 
@@ -488,5 +506,7 @@ function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
     notes: (data.notes as NotesRecord | undefined) ?? {},
     allowedUids,
     matchSummary,
+    activeMatchStartedAt:
+      data.activeMatchStartedAt instanceof Timestamp ? (data.activeMatchStartedAt as Timestamp) : null,
   } satisfies RoomDocument;
 }

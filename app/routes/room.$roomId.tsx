@@ -16,6 +16,7 @@ import {
   sendRoomSystemEvent,
   updateRoomStatus,
   saveRoomMatchSummary,
+  markRoomMatchStarted,
   startRoomRematch,
   type RoomDocument,
   type RoomMember,
@@ -31,6 +32,7 @@ import { MatchTimeline } from "../components/timeline/MatchTimeline";
 import { ConfettiBurst } from "../components/effects/ConfettiBurst";
 import { usePreferences } from "../contexts/PreferencesContext";
 import { useUnreadChat } from "../hooks/useUnreadChat";
+import { formatDuration } from "../utils/time";
 
 export function meta({ params }: Route.MetaArgs) {
   return [
@@ -159,6 +161,12 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   });
   const hasPersistedSummaryRef = useRef(Boolean(room.matchSummary));
   const persistSummaryInFlightRef = useRef(false);
+  const [liveStartMs, setLiveStartMs] = useState<number | null>(
+    room.activeMatchStartedAt ? room.activeMatchStartedAt.toMillis() : null,
+  );
+  const [liveDurationMs, setLiveDurationMs] = useState<number | null>(null);
+  const summaryDurationMs = matchSummary?.durationMs ?? null;
+  const timerAutoStartedRef = useRef(false);
 
   const handleStatePersist = useCallback(
     (state: SudokuSerializedState) => {
@@ -222,6 +230,13 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   }, [room.matchSummary]);
 
   useEffect(() => {
+    if (!room.activeMatchStartedAt) return;
+    const startMs = room.activeMatchStartedAt.toMillis();
+    startTimeRef.current = startMs;
+    setLiveStartMs((previous) => (previous === startMs ? previous : startMs));
+  }, [room.activeMatchStartedAt]);
+
+  useEffect(() => {
     if (!matchSummary) return;
     if (room.matchSummary) return;
     if (hasPersistedSummaryRef.current || persistSummaryInFlightRef.current) return;
@@ -237,6 +252,46 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       }
     })();
   }, [matchSummary, room.matchSummary, roomId]);
+
+  useEffect(() => {
+    if (summaryDurationMs !== null) {
+      setLiveDurationMs((previous) => (previous === summaryDurationMs ? previous : summaryDurationMs));
+      return;
+    }
+
+    if (!liveStartMs || room.status === "waiting") {
+      setLiveDurationMs((previous) => (previous === null ? previous : null));
+      return;
+    }
+
+    const updateDuration = () => {
+      const next = Math.max(0, Date.now() - liveStartMs);
+      setLiveDurationMs((previous) => (previous === next ? previous : next));
+    };
+
+    updateDuration();
+    const intervalId = window.setInterval(updateDuration, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [liveStartMs, room.status, summaryDurationMs]);
+
+  useEffect(() => {
+    if (room.status === "completed") return;
+    if (room.activeMatchStartedAt) return;
+    if (timerAutoStartedRef.current) return;
+
+    const now = Date.now();
+    timerAutoStartedRef.current = true;
+    startTimeRef.current = now;
+    setLiveStartMs(now);
+    setLiveDurationMs(0);
+    markRoomMatchStarted(roomId).catch((error) => {
+      console.error("Failed to mark match start", error);
+      timerAutoStartedRef.current = false;
+    });
+  }, [room.activeMatchStartedAt, room.status, roomId]);
 
   const game = useSudokuGame({
     puzzle: room.puzzle,
@@ -265,7 +320,19 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
 
       if (!hasActivated.current && nextValue !== null) {
         hasActivated.current = true;
-        startTimeRef.current = Date.now();
+        if (liveStartMs === null) {
+          const now = Date.now();
+          startTimeRef.current = now;
+          setLiveStartMs(now);
+          setLiveDurationMs(0);
+        } else {
+          startTimeRef.current = liveStartMs;
+        }
+        if (!room.activeMatchStartedAt) {
+          markRoomMatchStarted(roomId).catch((error) =>
+            console.error("Failed to mark match start", error),
+          );
+        }
         streakRef.current = 0;
         bestStreakRef.current = 0;
         totalCorrectRef.current = 0;
@@ -313,6 +380,9 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       }
     },
   });
+
+  const timerIsRunning = room.status === "active" && !game.isComplete && liveDurationMs !== null;
+  const elapsedForDisplay = summaryDurationMs ?? liveDurationMs;
 
   const peers = members.map((member) => ({
     id: member.uid,
@@ -477,6 +547,9 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       statusRef.current = "waiting";
       hasActivated.current = false;
       setMatchSummary(null);
+      setLiveStartMs(null);
+      setLiveDurationMs(null);
+      timerAutoStartedRef.current = false;
     } catch (error) {
       console.error("Failed to start rematch", error);
       setRematchStatus("error");
@@ -515,6 +588,9 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     startTimeRef.current = Date.now();
     completedDurationRef.current = null;
     setMatchSummary(null);
+    setLiveStartMs(null);
+    setLiveDurationMs(null);
+    timerAutoStartedRef.current = false;
   }, [roomId, room.status]);
 
   useEffect(() => {
@@ -687,6 +763,8 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
             highlightColor={preferences.highlightColor}
             showPresenceBadges={preferences.showPresenceBadges}
             allowHints={preferences.allowHints}
+            elapsedMs={elapsedForDisplay}
+            isTimerRunning={timerIsRunning}
           />
           <MatchTimeline events={events} members={members} />
         </div>
@@ -720,6 +798,8 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
           highlightColor={preferences.highlightColor}
           showPresenceBadges={preferences.showPresenceBadges}
           allowHints={preferences.allowHints}
+          elapsedMs={elapsedForDisplay}
+          isTimerRunning={timerIsRunning}
         />
         <div className="flex gap-3">
           <Button className="flex-1" variant="outline" onClick={() => setShowMobileTimeline(true)}>
@@ -946,20 +1026,4 @@ function SummaryCard({ label, value }: SummaryCardProps) {
       <p className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">{value}</p>
     </div>
   );
-}
-
-function formatDuration(durationMs: number | null) {
-  if (!durationMs || durationMs < 1000) return "—";
-  const totalSeconds = Math.floor(durationMs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60);
-    const remMinutes = minutes % 60;
-    return `${hours}h ${remMinutes}m`;
-  }
-  if (minutes > 0) {
-    return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
-  }
-  return `${seconds}s`;
 }
