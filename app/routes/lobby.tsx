@@ -260,13 +260,13 @@ function RoomCard({ room, onCopy, copied, isOwnRoom }: RoomCardProps) {
           </div>
         </div>
       </div>
-      <div className="mt-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+      <div className="mt-4 space-y-3">
+        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 break-all">
           <Share2 className="h-3.5 w-3.5 text-blue-500" aria-hidden="true" />
           <span className="truncate">{room.id}</span>
         </div>
-        <div className="flex items-center gap-2">
-          <Button asChild size="sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
+          <Button asChild size="sm" className="w-full sm:w-auto">
             <Link to={`/room/${room.id}`}>Join</Link>
           </Button>
           <Button
@@ -274,7 +274,7 @@ function RoomCard({ room, onCopy, copied, isOwnRoom }: RoomCardProps) {
             variant="outline"
             size="sm"
             onClick={() => onCopy(room.id)}
-            className="flex items-center gap-1 text-xs"
+            className="flex items-center gap-1 text-xs w-full sm:w-auto"
           >
             <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
             {copied ? "Copied!" : "Copy"}
