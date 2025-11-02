@@ -125,7 +125,7 @@ export default function Rooms() {
             </p>
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {filteredRooms.map((room) => (
               <RoomCard key={room.id} room={room} />
             ))}
