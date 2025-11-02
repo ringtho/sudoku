@@ -1,5 +1,6 @@
 import type { Route } from "./+types/room.$roomId";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import clsx from "clsx";
 import { useParams } from "react-router";
 import { RequireAuth } from "../components/layout/RequireAuth";
 import { useSudokuGame, type NotesRecord, type SudokuSerializedState, indexToRowColumn } from "../hooks/useSudokuGame";
@@ -17,7 +18,6 @@ import {
   updateRoomStatus,
   saveRoomMatchSummary,
   markRoomMatchStarted,
-  pauseRoomMatch,
   startRoomRematch,
   type RoomDocument,
   type RoomMember,
@@ -147,7 +147,6 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   const idleNotifiedRef = useRef(false);
   const joinAnnouncedRef = useRef(false);
   const sharedCellNotificationRef = useRef<Map<number, number>>(new Map());
-  const startTimeRef = useRef<number>(Date.now());
   const completedDurationRef = useRef<number | null>(null);
   const previousRoomIdRef = useRef<string>(roomId);
   const previousStatusRef = useRef<RoomStatus>(room.status);
@@ -164,17 +163,8 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   const hasPersistedSummaryRef = useRef(Boolean(room.matchSummary));
   const persistSummaryInFlightRef = useRef(false);
   const summaryDurationMs = matchSummary?.durationMs ?? null;
-  const timerAutoStartedRef = useRef(false);
-  const [timerStatus, setTimerStatus] = useState<"idle" | "running" | "paused" | "completed">("idle");
-  const [timerDisplayMs, setTimerDisplayMs] = useState<number>(0);
-  const [timerCatchUp, setTimerCatchUp] = useState(false);
-  const previousTimerStatusRef = useRef<"idle" | "running" | "paused" | "completed">("idle");
-  const displayDurationRef = useRef(0);
-  const latestRoomRef = useRef(room);
-  const latestMembersRef = useRef(members);
-  const roomIdRef = useRef(roomId);
-  const previousOtherCountRef = useRef<number>(
-    members.filter((member) => member.uid !== currentUserId).length,
+  const [liveTimerMs, setLiveTimerMs] = useState<number>(() =>
+    typeof room.activeMatchElapsedMs === "number" ? room.activeMatchElapsedMs : 0,
   );
   const [memberPhotoOverrides, setMemberPhotoOverrides] = useState<Record<string, string | null>>({});
 
@@ -296,95 +286,27 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   }, [members, memberPhotoOverrides]);
 
   useEffect(() => {
-    latestRoomRef.current = room;
-  }, [room]);
-
-  useEffect(() => {
-    latestMembersRef.current = members;
-  }, [members]);
-
-  useEffect(() => {
-    roomIdRef.current = roomId;
-  }, [roomId]);
-
-  useEffect(() => {
-    const baseElapsed = typeof room.activeMatchElapsedMs === "number" ? room.activeMatchElapsedMs : 0;
-    const startedAtTimestamp = room.activeMatchStartedAt ? room.activeMatchStartedAt.toMillis() : null;
-
     if (summaryDurationMs !== null && room.status === "completed") {
-      setTimerStatus("completed");
-      setTimerDisplayMs(summaryDurationMs);
-      displayDurationRef.current = summaryDurationMs;
+      setLiveTimerMs(summaryDurationMs);
       return;
     }
 
-    if (startedAtTimestamp) {
-      setTimerStatus("running");
-      startTimeRef.current = startedAtTimestamp;
-      const update = () => {
-        const next = baseElapsed + (Date.now() - startedAtTimestamp);
-        displayDurationRef.current = next;
-        setTimerDisplayMs((previous) => (previous === next ? previous : next));
-      };
-      update();
-      const intervalId = window.setInterval(update, 1000);
-      return () => {
-        window.clearInterval(intervalId);
-      };
-    }
+    const baseElapsed = typeof room.activeMatchElapsedMs === "number" ? room.activeMatchElapsedMs : 0;
+    const startedAt = room.activeMatchStartedAt ? room.activeMatchStartedAt.toMillis() : null;
 
-    if (baseElapsed > 0) {
-      setTimerStatus("paused");
-      setTimerDisplayMs(baseElapsed);
-      displayDurationRef.current = baseElapsed;
+    if (!startedAt) {
+      setLiveTimerMs(baseElapsed);
       return;
     }
 
-    if (room.status === "completed") {
-      setTimerStatus("completed");
-      setTimerDisplayMs(summaryDurationMs ?? baseElapsed);
-      displayDurationRef.current = summaryDurationMs ?? baseElapsed;
-      return;
-    }
+    const update = () => {
+      setLiveTimerMs(baseElapsed + (Date.now() - startedAt));
+    };
 
-    setTimerStatus(room.status === "waiting" ? "idle" : "paused");
-    setTimerDisplayMs(baseElapsed);
-    displayDurationRef.current = baseElapsed;
+    update();
+    const intervalId = window.setInterval(update, 1000);
+    return () => window.clearInterval(intervalId);
   }, [room.activeMatchStartedAt, room.activeMatchElapsedMs, room.status, summaryDurationMs]);
-
-  useEffect(() => {
-    const previous = previousTimerStatusRef.current;
-    if (timerStatus === "running" && previous !== "running") {
-      setTimerCatchUp(true);
-      const timeoutId = window.setTimeout(() => setTimerCatchUp(false), 900);
-      previousTimerStatusRef.current = timerStatus;
-      return () => {
-        window.clearTimeout(timeoutId);
-      };
-    }
-    previousTimerStatusRef.current = timerStatus;
-    if (timerStatus !== "running") {
-      setTimerCatchUp(false);
-    }
-  }, [timerStatus]);
-
-  useEffect(() => {
-    if (!currentUser) return;
-    if (room.status === "completed") return;
-    if (room.activeMatchStartedAt || (room.activeMatchElapsedMs ?? 0) > 0) return;
-    if (timerAutoStartedRef.current) return;
-
-    timerAutoStartedRef.current = true;
-    startTimeRef.current = Date.now();
-    markRoomMatchStarted(roomId, {
-      actorUid: currentUser.uid,
-      actorName: currentUser.displayName ?? currentUser.email ?? "Player",
-      resetElapsed: true,
-    }).catch((error) => {
-      console.error("Failed to mark match start", error);
-      timerAutoStartedRef.current = false;
-    });
-  }, [currentUser, room.activeMatchStartedAt, room.activeMatchElapsedMs, room.status, roomId]);
 
   const game = useSudokuGame({
     puzzle: room.puzzle,
@@ -420,9 +342,6 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
             actorName: currentUser.displayName ?? currentUser.email ?? "Player",
             resetElapsed: shouldResetElapsed,
           }).catch((error) => console.error("Failed to mark match start", error));
-          startTimeRef.current = Date.now();
-        } else {
-          startTimeRef.current = room.activeMatchStartedAt.toMillis();
         }
         streakRef.current = 0;
         bestStreakRef.current = 0;
@@ -472,53 +391,9 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     },
   });
 
-  const elapsedForDisplay = summaryDurationMs ?? timerDisplayMs;
-  const isTimerRunning = timerStatus === "running";
-  const timerStartedByName = room.activeMatchStartedByName;
-  const timerInitialStartedAt = room.activeMatchInitialStartedAt
-    ? room.activeMatchInitialStartedAt.toDate()
-    : null;
-  const timerPausedAt = room.activeMatchPausedAt ? room.activeMatchPausedAt.toDate() : null;
-
-  const timerSubtitleText = useMemo(() => {
-    if (timerStatus === "paused" && (room.activeMatchElapsedMs ?? 0) > 0) {
-      if (timerPausedAt) {
-        const pausedLabel = timerPausedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        return `Paused at ${pausedLabel} — resume when someone makes a move.`;
-      }
-      return "Paused—resume when someone makes a move.";
-    }
-    if (timerStatus === "running" || timerStatus === "idle") {
-      const timeLabel = timerInitialStartedAt
-        ? timerInitialStartedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-        : null;
-      if (timerStartedByName && timeLabel) {
-        return `Started by ${timerStartedByName} at ${timeLabel}`;
-      }
-      if (timerStartedByName) {
-        return `Started by ${timerStartedByName}`;
-      }
-      if (timeLabel) {
-        return `Started at ${timeLabel}`;
-      }
-    }
-    if (timerStatus === "completed" && matchSummary?.durationMs !== null) {
-      const completedAt = room.matchSummary?.completedAt?.toDate();
-      if (completedAt) {
-        const completedLabel = completedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        return `Finished at ${completedLabel}`;
-      }
-    }
-    return null;
-  }, [
-    timerStatus,
-    timerStartedByName,
-    timerInitialStartedAt,
-    timerPausedAt,
-    room.activeMatchElapsedMs,
-    matchSummary?.durationMs,
-    room.matchSummary?.completedAt,
-  ]);
+  const elapsedForDisplay = Math.max(0, Math.floor((summaryDurationMs ?? liveTimerMs) ?? 0));
+  const timerCompleted = Boolean(matchSummary);
+  const timerRunning = !timerCompleted && Boolean(room.activeMatchStartedAt);
 
   const bestDurationMs = typeof room.bestMatchDurationMs === "number" ? room.bestMatchDurationMs : null;
   const isNewPersonalBest =
@@ -587,44 +462,6 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       );
     };
   }, [currentMemberColor, currentUser, roomId]);
-
-  useEffect(() => {
-    const otherCount = members.filter((member) => member.uid !== currentUserId).length;
-    const lastCount = previousOtherCountRef.current;
-    previousOtherCountRef.current = otherCount;
-
-    const timerInProgress =
-      Boolean(room.activeMatchStartedAt) || (room.activeMatchElapsedMs ?? 0) > 0;
-    if (room.status === "completed" || !timerInProgress) {
-      return;
-    }
-    if (lastCount > 0 && otherCount === 0) {
-      pauseRoomMatch(roomId, displayDurationRef.current).catch((error) =>
-        console.error("Failed to pause match timer", error),
-      );
-    }
-  }, [members, currentUserId, room.activeMatchStartedAt, room.activeMatchElapsedMs, room.status, roomId]);
-
-  useEffect(() => {
-    return () => {
-      timerAutoStartedRef.current = false;
-      const latestRoom = latestRoomRef.current;
-      if (!latestRoom || latestRoom.status === "completed") {
-        return;
-      }
-      const timerInProgress =
-        Boolean(latestRoom.activeMatchStartedAt) || (latestRoom.activeMatchElapsedMs ?? 0) > 0;
-      if (!timerInProgress) {
-        return;
-      }
-      const otherMembers = latestMembersRef.current.filter((member) => member.uid !== currentUserId);
-      if (otherMembers.length === 0) {
-        pauseRoomMatch(roomIdRef.current, displayDurationRef.current).catch((error) =>
-          console.error("Failed to pause match timer", error),
-        );
-      }
-    };
-  }, [currentUserId]);
 
   const roomShareUrl =
     typeof window !== "undefined" ? window.location.href : `https://sudoku.local/room/${roomId}`;
@@ -731,18 +568,13 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       streakRef.current = 0;
       bestStreakRef.current = 0;
       totalCorrectRef.current = 0;
-      startTimeRef.current = Date.now();
       completedDurationRef.current = null;
       lastActivityRef.current = Date.now();
       idleNotifiedRef.current = false;
       statusRef.current = "waiting";
       hasActivated.current = false;
       setMatchSummary(null);
-      setTimerStatus("idle");
-      setTimerDisplayMs(0);
-      displayDurationRef.current = 0;
-      setTimerCatchUp(false);
-      timerAutoStartedRef.current = false;
+      setLiveTimerMs(0);
     } catch (error) {
       console.error("Failed to start rematch", error);
       setRematchStatus("error");
@@ -778,16 +610,10 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     idleNotifiedRef.current = false;
     joinAnnouncedRef.current = false;
     sharedCellNotificationRef.current.clear();
-    startTimeRef.current = Date.now();
     completedDurationRef.current = null;
     setMatchSummary(null);
-    setTimerStatus(room.status === "completed" ? "completed" : "idle");
-    setTimerDisplayMs(0);
-    displayDurationRef.current = 0;
-    setTimerCatchUp(false);
-    timerAutoStartedRef.current = false;
-    previousOtherCountRef.current = members.filter((member) => member.uid !== currentUserId).length;
-  }, [roomId, room.status]);
+    setLiveTimerMs(typeof room.activeMatchElapsedMs === "number" ? room.activeMatchElapsedMs : 0);
+  }, [roomId, room.status, room.activeMatchElapsedMs]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -813,7 +639,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
         );
       }
       if (!completedDurationRef.current) {
-        completedDurationRef.current = Date.now() - startTimeRef.current;
+        completedDurationRef.current = liveTimerMs;
       }
       const hintsUsedValue = preferences.allowHints ? Math.max(0, 3 - hintsRemaining) : null;
       const summaryPayload: RoomMatchSummaryInput = {
@@ -831,7 +657,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     } else if (!game.isComplete) {
       hasCelebrated.current = false;
     }
-  }, [currentUser, game.isComplete, roomId]);
+  }, [currentUser, game.isComplete, roomId, preferences.allowHints, hintsRemaining, room.status, liveTimerMs]);
 
   useEffect(() => {
     if (!currentUser || joinAnnouncedRef.current) return;
@@ -952,26 +778,22 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       <div className="sticky top-16 z-30 flex items-center justify-between rounded-full border border-blue-100/70 bg-white/90 px-3 py-2 text-xs shadow-sm ring-1 ring-black/5 backdrop-blur dark:border-blue-500/20 dark:bg-slate-950/80 dark:ring-white/10 lg:hidden">
         <div className="flex items-center gap-2 font-semibold text-gray-800 dark:text-gray-100">
           <Clock className="h-4 w-4 text-blue-500 dark:text-blue-300" aria-hidden="true" />
-          <span className={`font-mono text-base tracking-tight ${timerCatchUp ? "animate-[pulse_1s_ease-in-out]" : ""}`}>
+          <span className="font-mono text-base tracking-tight">
             {formatDuration(elapsedForDisplay)}
           </span>
-          {isTimerRunning ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-200">
-              <span className="h-1 w-1 animate-pulse rounded-full bg-emerald-500 dark:bg-emerald-300" aria-hidden="true" />
-              Live
-            </span>
-          ) : null}
-          {timerStatus === "paused" && elapsedForDisplay > 0 ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:bg-amber-400/10 dark:text-amber-200">
-              Paused
-            </span>
-          ) : null}
         </div>
-        {timerSubtitleText ? (
-          <span className="ml-3 max-w-[55%] truncate text-[11px] font-medium text-blue-600/80 dark:text-blue-200/80">
-            {timerSubtitleText}
-          </span>
-        ) : null}
+        <span
+          className={clsx(
+            "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+            timerCompleted
+              ? "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-200"
+              : timerRunning
+                ? "bg-blue-500/15 text-blue-600 dark:bg-blue-400/10 dark:text-blue-200"
+                : "bg-slate-500/10 text-slate-500 dark:bg-slate-400/10 dark:text-slate-300",
+          )}
+        >
+          {timerCompleted ? "Finished" : timerRunning ? "Running" : "Ready"}
+        </span>
       </div>
 
       <section className="hidden gap-6 items-start lg:grid lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
@@ -985,9 +807,8 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
             showPresenceBadges={preferences.showPresenceBadges}
             allowHints={preferences.allowHints}
             elapsedMs={elapsedForDisplay}
-            timerStatus={timerStatus}
-            timerSubtitle={timerSubtitleText}
-            timerCatchUp={timerCatchUp}
+            timerRunning={timerRunning}
+            timerCompleted={timerCompleted}
           />
           <MatchTimeline events={events} members={membersWithPhotos} />
         </div>
@@ -1022,9 +843,8 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
           showPresenceBadges={preferences.showPresenceBadges}
           allowHints={preferences.allowHints}
           elapsedMs={elapsedForDisplay}
-          timerStatus={timerStatus}
-          timerSubtitle={timerSubtitleText}
-          timerCatchUp={timerCatchUp}
+          timerRunning={timerRunning}
+          timerCompleted={timerCompleted}
         />
         <div className="flex gap-3">
           <Button className="flex-1" variant="outline" onClick={() => setShowMobileTimeline(true)}>

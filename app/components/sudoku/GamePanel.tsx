@@ -16,9 +16,8 @@ type SudokuGamePanelProps = {
   showPresenceBadges?: boolean;
   allowHints?: boolean;
   elapsedMs?: number | null;
-  timerStatus?: "idle" | "running" | "paused" | "completed";
-  timerSubtitle?: string | null;
-  timerCatchUp?: boolean;
+  timerRunning?: boolean;
+  timerCompleted?: boolean;
 };
 
 export function SudokuGamePanel({
@@ -31,9 +30,8 @@ export function SudokuGamePanel({
   showPresenceBadges = true,
   allowHints = true,
   elapsedMs = null,
-  timerStatus = "idle",
-  timerSubtitle = null,
-  timerCatchUp = false,
+  timerRunning = false,
+  timerCompleted = false,
 }: SudokuGamePanelProps) {
   const {
     board,
@@ -110,34 +108,28 @@ export function SudokuGamePanel({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">
                 <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Match time</span>
-                {timerStatus === "running" ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-300">
-                    <span
-                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500 dark:bg-emerald-300"
-                      aria-hidden="true"
-                    />
-                    Live
+                <span>Timer</span>
+                {timerCompleted ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-200">
+                    Finished
                   </span>
-                ) : null}
-                {timerStatus === "paused" && elapsedMs ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:bg-amber-400/10 dark:text-amber-200">
-                    Paused
+                ) : timerRunning ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:bg-blue-400/10 dark:text-blue-200">
+                    Running
                   </span>
-                ) : null}
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/10 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-400/10 dark:text-slate-300">
+                    Ready
+                  </span>
+                )}
               </div>
-              <span
-                className={`font-mono text-2xl font-semibold tracking-tight text-gray-900 transition dark:text-gray-100 ${
-                  timerCatchUp ? "animate-[pulse_1s_ease-in-out]" : ""
-                }`}
-                aria-live="polite"
-              >
-                {elapsedMs !== null ? formatDuration(elapsedMs) : "—"}
+              <span className="font-mono text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-100" aria-live="polite">
+                {elapsedMs !== null ? formatDuration(elapsedMs) : "00:00"}
               </span>
             </div>
-            {timerSubtitle ? (
-              <p className="text-[11px] font-medium text-blue-700/70 dark:text-blue-300/70">{timerSubtitle}</p>
-            ) : null}
+            <p className="text-[11px] font-medium text-blue-700/70 dark:text-blue-300/70">
+              Timer starts with the first move and stops when the puzzle is complete.
+            </p>
           </div>
         </div>
         <SudokuBoardView
