@@ -4,6 +4,7 @@ import { RequireAuth } from "../components/layout/RequireAuth";
 import { useAuth } from "../contexts/AuthContext";
 import { useRoomsList } from "../hooks/useRoomsList";
 import { Button } from "../components/ui/button";
+import { Avatar } from "../components/ui/avatar";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -52,11 +53,20 @@ export default function Rooms() {
                 key={room.id}
                 className="flex flex-col gap-3 rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:flex-row sm:items-center sm:justify-between"
               >
-                <div>
-                  <h2 className="text-lg font-semibold">{room.name || "Untitled room"}</h2>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Difficulty: {room.difficulty} · Last updated {formatRelativeTime(room.updatedAt?.toDate() ?? new Date())}
-                  </p>
+                <div className="flex items-center gap-3">
+                  <Avatar
+                    src={room.ownerPhotoURL ?? undefined}
+                    name={room.ownerName || room.ownerUid}
+                    size="sm"
+                    fallbackColor={room.ownerColor ?? "#6366f1"}
+                    className="shadow ring-2 ring-white dark:ring-slate-900"
+                  />
+                  <div>
+                    <h2 className="text-lg font-semibold">{room.name || "Untitled room"}</h2>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Difficulty: {room.difficulty} · Last updated {formatRelativeTime(room.updatedAt?.toDate() ?? new Date())}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <Button asChild variant="outline">

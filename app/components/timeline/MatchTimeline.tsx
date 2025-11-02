@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { RoomEvent, RoomMember } from "../../libs/rooms";
 import { CheckCircle2, History, Target, TrendingUp, XCircle, Lightbulb, Trophy } from "lucide-react";
 import clsx from "clsx";
+import { Avatar } from "../ui/avatar";
 
 type MatchTimelineProps = {
   events: RoomEvent[];
@@ -12,8 +13,6 @@ type Streak = {
   best: number;
   current: number;
 };
-
-const colors = ["#6366f1", "#f97316", "#14b8a6", "#ec4899", "#22d3ee", "#facc15"];
 
 export function MatchTimeline({ events, members }: MatchTimelineProps) {
   const timelineEvents = useMemo(
@@ -119,19 +118,21 @@ export function MatchTimeline({ events, members }: MatchTimelineProps) {
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3 text-xs font-medium text-gray-500 dark:text-gray-300">
-        {members.map((member, index) => {
+        {members.map((member) => {
           const streak = stats.streaks.get(member.uid);
+          const displayName = member.displayName || "Player";
           return (
             <div
               key={member.uid}
               className="flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 dark:bg-gray-900"
             >
-              <span
-                className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold text-white"
-                style={{ backgroundColor: member.color ?? colors[index % colors.length] }}
-              >
-                {member.displayName.slice(0, 1)}
-              </span>
+              <Avatar
+                src={member.photoURL ?? undefined}
+                name={displayName}
+                size="sm"
+                fallbackColor={member.color}
+                className="h-6 w-6 text-[10px] font-semibold shadow ring-2 ring-white dark:ring-slate-900"
+              />
               <span>
                 streak&nbsp;
                 <strong>{streak?.current ?? 0}</strong>
@@ -183,7 +184,8 @@ export function MatchTimeline({ events, members }: MatchTimelineProps) {
             const row = Math.floor(event.cellIndex / 9) + 1;
             const col = (event.cellIndex % 9) + 1;
             const isClear = event.value === null;
-            const badge = member?.displayName ?? event.actorName;
+            const badgeName = member?.displayName ?? event.actorName;
+            const badgeColor = member?.color ?? "#6366f1";
             return (
               <li key={event.id} className="relative pl-6">
                 <span
@@ -197,7 +199,14 @@ export function MatchTimeline({ events, members }: MatchTimelineProps) {
                   )}
                 />
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-gray-800 dark:text-gray-100">{badge}</span>
+                  <Avatar
+                    src={member?.photoURL ?? undefined}
+                    name={badgeName}
+                    size="sm"
+                    fallbackColor={badgeColor}
+                    className="h-6 w-6 text-[10px] font-semibold shadow ring-2 ring-white dark:ring-slate-900"
+                  />
+                  <span className="font-semibold text-gray-800 dark:text-gray-100">{badgeName}</span>
                   <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:bg-gray-900 dark:text-gray-300">
                     r{row} · c{col}
                   </span>

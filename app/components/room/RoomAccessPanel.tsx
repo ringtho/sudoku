@@ -15,6 +15,7 @@ import {
   type UserProfile,
 } from "../../libs/profiles";
 import { Button } from "../ui/button";
+import { Avatar } from "../ui/avatar";
 
 type RoomAccessPanelProps = {
   roomId: string;
@@ -430,9 +431,15 @@ export function RoomAccessPanel({ roomId, roomName, ownerUid, allowedUids, curre
                       key={profile.uid}
                       type="button"
                       onClick={() => handleGrantProfile(profile)}
-                      className="group inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1 text-sm font-medium text-gray-700 transition hover:border-blue-300 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 hover:dark:border-blue-500/50 hover:dark:text-blue-300"
+                      className="group inline-flex items-center gap-3 rounded-full border border-gray-200 bg-white px-3 py-1 text-sm font-medium text-gray-700 transition hover:border-blue-300 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 hover:dark:border-blue-500/50 hover:dark:text-blue-300"
                       disabled={status === "saving"}
                     >
+                      <Avatar
+                        src={profile.photoURL ?? undefined}
+                        name={displayName}
+                        size="sm"
+                        className="h-8 w-8 text-xs shadow ring-2 ring-white dark:ring-slate-900"
+                      />
                       <div className="flex flex-col items-start text-left">
                         <span className="truncate max-w-[160px] text-xs font-semibold">{displayName}</span>
                         <span className="truncate max-w-[160px] text-[10px] text-gray-400 dark:text-gray-500">
@@ -488,11 +495,19 @@ export function RoomAccessPanel({ roomId, roomName, ownerUid, allowedUids, curre
                       key={profile.uid}
                       className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-3 py-2 dark:border-slate-700"
                     >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{displayName}</p>
-                        <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">
-                          {profile.email ?? "No email on file"}
-                        </p>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <Avatar
+                          src={profile.photoURL ?? undefined}
+                          name={displayName}
+                          size="sm"
+                          className="h-8 w-8 text-xs shadow ring-2 ring-white dark:ring-slate-900"
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">{displayName}</p>
+                          <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">
+                            {profile.email ?? "No email on file"}
+                          </p>
+                        </div>
                       </div>
                       <Button
                         type="button"
@@ -604,11 +619,21 @@ export function RoomAccessPanel({ roomId, roomName, ownerUid, allowedUids, curre
         <ul className="space-y-1 text-xs">
           {allowedEntries.map(({ uid, isOwner, profile }) => {
             const displayName = profile?.displayName ?? profile?.email ?? uid;
+            const avatarName = displayName || uid;
+            const avatarSrc = profile?.photoURL ?? null;
             return (
               <li key={uid} className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 dark:bg-slate-900">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-gray-800 dark:text-gray-100">{displayName}</p>
-                  <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">{profile?.email ?? uid}</p>
+                <div className="flex min-w-0 items-center gap-3">
+                  <Avatar
+                    src={avatarSrc ?? undefined}
+                    name={avatarName}
+                    size="sm"
+                    className="h-8 w-8 text-xs shadow ring-2 ring-white dark:ring-slate-900"
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-gray-800 dark:text-gray-100">{displayName}</p>
+                    <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">{profile?.email ?? uid}</p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   {isOwner ? (

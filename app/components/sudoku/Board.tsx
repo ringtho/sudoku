@@ -10,6 +10,7 @@ export type CollaboratorPresence = {
   name: string;
   color: string;
   cellIndex: number | null;
+  photoURL?: string | null;
 };
 
 type SudokuBoardProps = {
@@ -66,8 +67,8 @@ export const SudokuBoardView = memo(function SudokuBoardView({
             highlightValue !== null && highlightValue === value && value !== null;
           const isConflict = conflicts.has(index);
           const locked = Boolean(lockedCells[index]);
-          const presence = showPresenceBadges ? presenceByCell.get(index) : undefined;
-          const presenceColor = presence && presence.length ? presence[0].color : undefined;
+          const cellPresence = showPresenceBadges ? presenceByCell.get(index) : undefined;
+          const presenceColor = cellPresence && cellPresence.length ? cellPresence[0].color : undefined;
           const isShaded = (Math.floor(row / 3) + Math.floor(col / 3)) % 2 === 0;
 
           return (
@@ -81,7 +82,8 @@ export const SudokuBoardView = memo(function SudokuBoardView({
                 isSameValueHighlighted={isSameValueHighlighted}
                 isConflict={isConflict}
                 isLocked={locked}
-                presence={presence}
+                presence={cellPresence}
+                showPresenceBadge={false}
                 onClick={() => onSelectCell(index)}
                 className={clsx(
                   "border-0",
@@ -90,20 +92,42 @@ export const SudokuBoardView = memo(function SudokuBoardView({
                 selectionColor={highlightColor}
                 style={presenceColor && !isSelected ? { boxShadow: `0 0 0 2px ${presenceColor}` } : undefined}
               />
-              {presence && presence.length ? (
-                <div className="pointer-events-none absolute -top-6 left-1/2 flex -translate-x-1/2 gap-1 text-[10px] font-semibold uppercase tracking-wide text-white">
-                  {presence.map((person) => (
-                    <span
-                      key={person.id}
-                      className="rounded-full px-2 py-0.5 shadow"
-                      style={{ backgroundColor: person.color }}
-                    >
-                      {person.name
+              {cellPresence && cellPresence.length ? (
+                <div className="pointer-events-none absolute -top-3 left-1/2 flex -translate-x-1/2 items-center gap-1">
+                  <div className="flex -space-x-1.5">
+                    {cellPresence.slice(0, 3).map((person) => {
+                      const initials = person.name
                         .split(" ")
                         .map((part) => part[0])
-                        .join("")}
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase();
+                      return (
+                        <div
+                          key={person.id}
+                          className="flex h-5 w-5 items-center justify-center overflow-hidden rounded-full border border-white/90 bg-slate-500 text-[8px] font-semibold text-white shadow-sm dark:border-slate-900"
+                          style={!person.photoURL ? { backgroundColor: person.color } : undefined}
+                          title={person.name}
+                        >
+                          {person.photoURL ? (
+                            <img
+                              src={person.photoURL}
+                              alt={person.name}
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            initials || "?"
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {cellPresence.length > 3 ? (
+                    <span className="rounded-full bg-gray-900/80 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow-sm dark:bg-white/20">
+                      +{cellPresence.length - 3}
                     </span>
-                  ))}
+                  ) : null}
                 </div>
               ) : null}
             </div>

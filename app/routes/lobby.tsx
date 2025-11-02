@@ -7,6 +7,7 @@ import { Button } from "../components/ui/button";
 import { useRoomsList } from "../hooks/useRoomsList";
 import { useAuth } from "../contexts/AuthContext";
 import type { Difficulty } from "../libs/sudoku";
+import { Avatar } from "../components/ui/avatar";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -122,17 +123,13 @@ export default function Lobby() {
                     </span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <div
-                      className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold text-white shadow"
-                      style={{ background: room.ownerColor ?? "#6366f1" }}
-                    >
-                      {(room.ownerName || truncateId(room.ownerUid))
-                        .split(" ")
-                        .map((part) => part[0])
-                        .join("")
-                        .slice(0, 2)
-                        .toUpperCase()}
-                    </div>
+                    <Avatar
+                      src={room.ownerPhotoURL ?? undefined}
+                      name={room.ownerName || truncateId(room.ownerUid)}
+                      size="sm"
+                      fallbackColor={room.ownerColor ?? "#6366f1"}
+                      className="shadow ring-2 ring-white dark:ring-slate-900"
+                    />
                     <div className="flex flex-col text-sm text-gray-600 dark:text-gray-300">
                       <span className="font-semibold text-gray-800 dark:text-gray-100">
                         {room.ownerUid === currentUser?.uid

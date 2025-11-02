@@ -25,6 +25,7 @@ import {
   type RoomStatus,
   type RoomMatchSummaryInput,
 } from "../libs/rooms";
+import { getProfilesByUids } from "../libs/profiles";
 import { boardToString } from "../libs/sudoku";
 import type { User } from "firebase/auth";
 import { RoomChat } from "../components/chat/RoomChat";
@@ -169,6 +170,13 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   const [timerCatchUp, setTimerCatchUp] = useState(false);
   const previousTimerStatusRef = useRef<"idle" | "running" | "paused" | "completed">("idle");
   const displayDurationRef = useRef(0);
+  const latestRoomRef = useRef(room);
+  const latestMembersRef = useRef(members);
+  const roomIdRef = useRef(roomId);
+  const previousOtherCountRef = useRef<number>(
+    members.filter((member) => member.uid !== currentUserId).length,
+  );
+  const [memberPhotoOverrides, setMemberPhotoOverrides] = useState<Record<string, string | null>>({});
 
   const handleStatePersist = useCallback(
     (state: SudokuSerializedState) => {
@@ -247,6 +255,57 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       }
     })();
   }, [matchSummary, room.matchSummary, roomId]);
+
+  useEffect(() => {
+    const missing = members
+      .filter((member) => !member.photoURL && memberPhotoOverrides[member.uid] === undefined)
+      .map((member) => member.uid);
+    if (missing.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const profileMap = await getProfilesByUids(missing);
+        if (cancelled) return;
+        setMemberPhotoOverrides((previous) => {
+          const next = { ...previous };
+          missing.forEach((uid) => {
+            const profile = profileMap.get(uid);
+            next[uid] = profile?.photoURL ?? null;
+          });
+          return next;
+        });
+      } catch (error) {
+        console.error("Failed to fetch member profile photos", error);
+        if (cancelled) return;
+        setMemberPhotoOverrides((previous) => {
+          const next = { ...previous };
+          missing.forEach((uid) => {
+            if (next[uid] === undefined) {
+              next[uid] = null;
+            }
+          });
+          return next;
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [members, memberPhotoOverrides]);
+
+  useEffect(() => {
+    latestRoomRef.current = room;
+  }, [room]);
+
+  useEffect(() => {
+    latestMembersRef.current = members;
+  }, [members]);
+
+  useEffect(() => {
+    roomIdRef.current = roomId;
+  }, [roomId]);
 
   useEffect(() => {
     const baseElapsed = typeof room.activeMatchElapsedMs === "number" ? room.activeMatchElapsedMs : 0;
@@ -465,10 +524,20 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   const isNewPersonalBest =
     bestDurationMs !== null && summaryDurationMs !== null && bestDurationMs === summaryDurationMs;
 
-  const peers = members.map((member) => ({
+  const membersWithPhotos = useMemo(
+    () =>
+      members.map((member) => ({
+        ...member,
+        photoURL: member.photoURL ?? memberPhotoOverrides[member.uid] ?? null,
+      })),
+    [members, memberPhotoOverrides],
+  );
+
+  const peers = membersWithPhotos.map((member) => ({
     id: member.uid,
     name: member.displayName,
     color: member.color,
+    photoURL: member.photoURL ?? null,
     cellIndex: member.cursorIndex,
   }));
 
@@ -477,7 +546,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     [events],
   );
   const unreadChatCount = useUnreadChat(chatEvents, showMobileChat, currentUserId, roomId);
-  const currentMember = members.find((member) => member.uid === currentUserId) ?? null;
+  const currentMember = membersWithPhotos.find((member) => member.uid === currentUserId) ?? null;
   const currentMemberColor = currentMember?.color;
 
   const localBoardString = useMemo(() => boardToString(game.board), [game.board]);
@@ -495,6 +564,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       displayName: currentUser.displayName ?? currentUser.email ?? "Player",
       cursorIndex: game.selectedIndex,
       isTyping: false,
+      photoURL: currentUser.photoURL ?? null,
     };
     if (currentMemberColor) {
       payload.color = currentMemberColor;
@@ -511,6 +581,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
       if (currentMemberColor) {
         payload.color = currentMemberColor;
       }
+      payload.photoURL = currentUser.photoURL ?? null;
       updatePresence(roomId, currentUser.uid, payload).catch((error) =>
         console.error("Failed to clear presence", error),
       );
@@ -518,17 +589,42 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
   }, [currentMemberColor, currentUser, roomId]);
 
   useEffect(() => {
+    const otherCount = members.filter((member) => member.uid !== currentUserId).length;
+    const lastCount = previousOtherCountRef.current;
+    previousOtherCountRef.current = otherCount;
+
+    const timerInProgress =
+      Boolean(room.activeMatchStartedAt) || (room.activeMatchElapsedMs ?? 0) > 0;
+    if (room.status === "completed" || !timerInProgress) {
+      return;
+    }
+    if (lastCount > 0 && otherCount === 0) {
+      pauseRoomMatch(roomId, displayDurationRef.current).catch((error) =>
+        console.error("Failed to pause match timer", error),
+      );
+    }
+  }, [members, currentUserId, room.activeMatchStartedAt, room.activeMatchElapsedMs, room.status, roomId]);
+
+  useEffect(() => {
     return () => {
       timerAutoStartedRef.current = false;
-      if (room.status === "completed") return;
-      const otherMembers = members.filter((member) => member.uid !== currentUserId);
-      if (otherMembers.length === 0 && (room.activeMatchStartedAt || (room.activeMatchElapsedMs ?? 0) > 0)) {
-        pauseRoomMatch(roomId, displayDurationRef.current).catch((error) =>
+      const latestRoom = latestRoomRef.current;
+      if (!latestRoom || latestRoom.status === "completed") {
+        return;
+      }
+      const timerInProgress =
+        Boolean(latestRoom.activeMatchStartedAt) || (latestRoom.activeMatchElapsedMs ?? 0) > 0;
+      if (!timerInProgress) {
+        return;
+      }
+      const otherMembers = latestMembersRef.current.filter((member) => member.uid !== currentUserId);
+      if (otherMembers.length === 0) {
+        pauseRoomMatch(roomIdRef.current, displayDurationRef.current).catch((error) =>
           console.error("Failed to pause match timer", error),
         );
       }
     };
-  }, [members, currentUserId, room.activeMatchStartedAt, room.activeMatchElapsedMs, room.status, roomId]);
+  }, [currentUserId]);
 
   const roomShareUrl =
     typeof window !== "undefined" ? window.location.href : `https://sudoku.local/room/${roomId}`;
@@ -600,6 +696,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
         displayName: currentUser.displayName ?? currentUser.email ?? "Player",
         cursorIndex: game.selectedIndex,
         isTyping,
+        photoURL: currentUser.photoURL ?? null,
       };
       if (currentMemberColor) {
         payload.color = currentMemberColor;
@@ -689,6 +786,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
     displayDurationRef.current = 0;
     setTimerCatchUp(false);
     timerAutoStartedRef.current = false;
+    previousOtherCountRef.current = members.filter((member) => member.uid !== currentUserId).length;
   }, [roomId, room.status]);
 
   useEffect(() => {
@@ -891,12 +989,12 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
             timerSubtitle={timerSubtitleText}
             timerCatchUp={timerCatchUp}
           />
-          <MatchTimeline events={events} members={members} />
+          <MatchTimeline events={events} members={membersWithPhotos} />
         </div>
         <div className="space-y-6">
           <RoomChat
             events={chatEvents}
-            members={members}
+            members={membersWithPhotos}
             currentUserId={currentUserId}
             onSend={handleSendMessage}
             onTypingChange={handleTypingChange}
@@ -961,7 +1059,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
         <MobileSheet title="Room chat" onClose={() => setShowMobileChat(false)}>
           <RoomChat
             events={chatEvents}
-            members={members}
+            members={membersWithPhotos}
             currentUserId={currentUserId}
             onSend={handleSendMessage}
             onTypingChange={handleTypingChange}
@@ -974,7 +1072,7 @@ function RoomContent({ room, members, events, roomId, currentUser }: RoomContent
 
       {showMobileTimeline ? (
         <MobileSheet title="Match timeline" onClose={() => setShowMobileTimeline(false)}>
-          <MatchTimeline events={events} members={members} />
+          <MatchTimeline events={events} members={membersWithPhotos} />
         </MobileSheet>
       ) : null}
 

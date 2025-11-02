@@ -40,6 +40,7 @@ export default function CreateRoom() {
         ownerUid: currentUser.uid,
         ownerName: currentUser.displayName ?? currentUser.email ?? "Player",
         ownerColor: selectedColor,
+        ownerPhotoURL: currentUser.photoURL ?? null,
       });
       const link = typeof window !== "undefined" ? `${window.location.origin}/room/${roomId}` : `/room/${roomId}`;
       setRoomInfo({ id: roomId, link });

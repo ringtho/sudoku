@@ -43,6 +43,7 @@ export type RoomDocument = {
   ownerUid: string;
   ownerName: string;
   ownerColor?: string;
+  ownerPhotoURL?: string | null;
   difficulty: Difficulty;
   status: RoomStatus;
   createdAt: Timestamp | null;
@@ -69,6 +70,7 @@ export type RoomMember = {
   cursorIndex: number | null;
   lastActive: Timestamp | null;
   isTyping?: boolean;
+  photoURL?: string | null;
 };
 
 export type RecentCollaborator = {
@@ -127,6 +129,7 @@ export type CreateRoomInput = {
   ownerUid: string;
   ownerName: string;
   ownerColor?: string;
+  ownerPhotoURL?: string | null;
 };
 
 const ROOM_COLORS = [
@@ -162,7 +165,14 @@ function membersCollection(db: Firestore, roomId: string) {
   return collection(roomDoc(db, roomId), "members");
 }
 
-export async function createRoom({ name, difficulty, ownerUid, ownerName, ownerColor }: CreateRoomInput) {
+export async function createRoom({
+  name,
+  difficulty,
+  ownerUid,
+  ownerName,
+  ownerColor,
+  ownerPhotoURL,
+}: CreateRoomInput) {
   const { db } = getFirebase();
   const { puzzle, solution } = generateSudoku(difficulty, `${ownerUid}-${Date.now()}`);
 
@@ -171,6 +181,7 @@ export async function createRoom({ name, difficulty, ownerUid, ownerName, ownerC
     ownerUid,
     ownerName,
     ownerColor: ownerColor ?? assignColor(ownerUid),
+    ownerPhotoURL: ownerPhotoURL ?? null,
     difficulty,
     status: "waiting" satisfies RoomStatus,
     createdAt: serverTimestamp(),
@@ -197,6 +208,7 @@ export async function createRoom({ name, difficulty, ownerUid, ownerName, ownerC
     cursorIndex: null,
     lastActive: serverTimestamp(),
     isTyping: false,
+    photoURL: ownerPhotoURL ?? null,
   });
 
   return roomRef.id;
@@ -379,6 +391,9 @@ export async function updatePresence(
   }
   if (data.isTyping !== undefined) {
     payload.isTyping = data.isTyping;
+  }
+  if (data.photoURL !== undefined) {
+    payload.photoURL = data.photoURL ?? null;
   }
   await setDoc(
     memberRef,
@@ -568,6 +583,7 @@ function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
       solution: "".padEnd(81, "1"),
       board: "".padEnd(81, "."),
       ownerColor: undefined,
+      ownerPhotoURL: null,
       notes: {},
       allowedUids: [],
       matchSummary: null,
@@ -605,6 +621,10 @@ function transformRoomSnapshot(snapshot: DocumentSnapshot): RoomDocument {
     ownerUid,
     ownerName: typeof data.ownerName === "string" ? data.ownerName : "",
     ownerColor: typeof data.ownerColor === "string" ? data.ownerColor : undefined,
+    ownerPhotoURL:
+      typeof data.ownerPhotoURL === "string" || data.ownerPhotoURL === null
+        ? (data.ownerPhotoURL as string | null)
+        : null,
     difficulty: (data.difficulty as Difficulty) ?? "medium",
     status: (data.status as RoomStatus) ?? "waiting",
     createdAt: (data.createdAt as Timestamp | null | undefined) ?? null,

@@ -5,6 +5,7 @@ type PresenceIndicator = {
   id: string;
   name: string;
   color: string;
+  photoURL?: string | null;
 };
 
 type SudokuCellProps = {
@@ -21,6 +22,7 @@ type SudokuCellProps = {
   className?: string;
   style?: CSSProperties;
   selectionColor?: string;
+  showPresenceBadge?: boolean;
 };
 
 export function SudokuCell({
@@ -37,6 +39,7 @@ export function SudokuCell({
   className,
   style,
   selectionColor,
+  showPresenceBadge = true,
 }: SudokuCellProps) {
   const showNotes = value === null && notes.length > 0;
   const ariaLabel = value
@@ -87,16 +90,36 @@ export function SudokuCell({
       ) : (
         null
       )}
-      {presence?.length ? (
+      {showPresenceBadge !== false && presence?.length ? (
         <span className="absolute right-1 top-1 flex gap-1">
-          {presence.map((person) => (
-            <span
-              key={person.id}
-              className="h-2 w-2 rounded-full ring-1 ring-white/70 dark:ring-slate-900"
-              style={{ backgroundColor: person.color }}
-              title={person.name}
-            />
-          ))}
+          {presence.map((person) => {
+            const initial =
+              person.name
+                ?.trim()
+                .split(" ")
+                .map((part) => part[0])
+                .join("")
+                .slice(0, 1)
+                .toUpperCase() || "?";
+            return person.photoURL ? (
+              <img
+                key={person.id}
+                src={person.photoURL}
+                alt={person.name}
+                className="h-3.5 w-3.5 rounded-full object-cover ring-[1.5px] ring-white/80 dark:ring-slate-900"
+                loading="lazy"
+              />
+            ) : (
+              <span
+                key={person.id}
+                className="flex h-3.5 w-3.5 items-center justify-center rounded-full text-[8px] font-semibold text-white ring-[1.5px] ring-white/80 dark:ring-slate-900"
+                style={{ backgroundColor: person.color }}
+                title={person.name}
+              >
+                {initial}
+              </span>
+            );
+          })}
         </span>
       ) : null}
       {isLocked ? (

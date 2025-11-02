@@ -201,17 +201,27 @@ export function RoomChat({
                 .join("")
                 .slice(0, 2)
                 .toUpperCase();
+              const avatarUrl = member?.photoURL ?? null;
 
               return (
                 <div key={event.id} className={clsx("flex items-start gap-2", isSelf ? "flex-row-reverse text-right" : "")}>
                   <div
                     className={clsx(
-                      "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white shadow-sm",
+                      "flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full text-[10px] font-semibold text-white shadow-sm",
                       member?.color ? "ring-2 ring-white dark:ring-gray-900" : "bg-slate-400",
                     )}
-                    style={member ? { backgroundColor: member.color } : undefined}
+                    style={!avatarUrl && member?.color ? { backgroundColor: member.color } : undefined}
                   >
-                    {initials ?? member?.displayName?.charAt(0) ?? "?"}
+                    {avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt={member?.displayName ?? event.actorName}
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      initials ?? member?.displayName?.charAt(0) ?? "?"
+                    )}
                   </div>
                   <div
                     className={clsx(

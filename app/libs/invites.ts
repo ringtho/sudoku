@@ -1,16 +1,17 @@
 import {
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
   getDoc,
+  limit,
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
-  Timestamp,
-  updateDoc,
-  limit,
   setDoc,
+  Timestamp,
   type Firestore,
   type FirestoreError,
   type QueryConstraint,
@@ -98,32 +99,41 @@ export async function redeemRoomInvite(
   userEmail?: string | null,
 ): Promise<void> {
   const { db } = getFirebase();
-  const ref = inviteDoc(db, roomId, inviteId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) {
-    throw new Error("Invite not found or already removed.");
-  }
+  const inviteRef = inviteDoc(db, roomId, inviteId);
+  const roomRef = doc(db, "rooms", roomId);
 
-  const data = snap.data() as Omit<RoomInvite, "id">;
-  if (data.redeemedBy) {
-    throw new Error("Invite already used.");
-  }
-  if (data.expiresAt && data.expiresAt.toDate() < new Date()) {
-    throw new Error("Invite has expired.");
-  }
-  if (data.mode === "email") {
-    if (!userEmail) {
-      throw new Error("Sign in with the invited email to join.");
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(inviteRef);
+    if (!snapshot.exists()) {
+      throw new Error("Invite not found or already removed.");
     }
-    const normalized = userEmail.trim().toLowerCase();
-    if (!data.targetEmail || normalized !== data.targetEmail) {
-      throw new Error("This invite is bound to a different email address.");
-    }
-  }
 
-  await updateDoc(ref, {
-    redeemedBy: uid,
-    redeemedAt: serverTimestamp(),
+    const data = snapshot.data() as Omit<RoomInvite, "id">;
+    if (data.redeemedBy) {
+      throw new Error("Invite already used.");
+    }
+    if (data.expiresAt && data.expiresAt.toDate() < new Date()) {
+      throw new Error("Invite has expired.");
+    }
+    if (data.mode === "email") {
+      if (!userEmail) {
+        throw new Error("Sign in with the invited email to join.");
+      }
+      const normalized = userEmail.trim().toLowerCase();
+      if (!data.targetEmail || normalized !== data.targetEmail) {
+        throw new Error("This invite is bound to a different email address.");
+      }
+    }
+
+    transaction.update(inviteRef, {
+      redeemedBy: uid,
+      redeemedAt: serverTimestamp(),
+    });
+
+    transaction.update(roomRef, {
+      allowedUids: arrayUnion(uid),
+      updatedAt: serverTimestamp(),
+    });
   });
 }
 
