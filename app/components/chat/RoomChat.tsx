@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 
 import type { RoomEvent, RoomMember } from "../../libs/rooms";
 import { Button } from "../ui/button";
+import { Smile } from "lucide-react";
 
 type ChatEvent = Extract<RoomEvent, { type: "chat" }>;
 
@@ -19,6 +20,29 @@ type RoomChatProps = {
 };
 
 const DEFAULT_CARD_HEIGHT = "h-[520px] md:h-[560px] lg:h-[600px]";
+
+const EMOJI_GROUPS: Array<{ label: string; emojis: string[] }> = [
+  {
+    label: "Celebration",
+    emojis: ["🎉", "🥳", "🏆", "⭐️", "👏", "🔥", "💯", "🎊", "🥂", "🌟"],
+  },
+  {
+    label: "Positivity",
+    emojis: ["😀", "😄", "😊", "😍", "😎", "🤩", "😁", "😇", "🤗", "🥰", "❤️", "💖", "💗"],
+  },
+  {
+    label: "Teamwork",
+    emojis: ["👍", "🙌", "🤝", "💪", "🙏", "🤗", "✨", "🤜", "🤛", "🧠"],
+  },
+  {
+    label: "Gaming",
+    emojis: ["🎯", "🧩", "🕹️", "📈", "🧠", "🪄", "🛡️", "⚡️", "🌀", "🧿"],
+  },
+  {
+    label: "Expressions",
+    emojis: ["🤔", "😅", "🤓", "🥲", "😴", "🤠", "🤭", "😤", "🤡", "🙃"],
+  },
+];
 
 export function RoomChat({
   events,
@@ -39,6 +63,10 @@ export function RoomChat({
   const initialScrollRef = useRef(true);
   const composerRef = useRef<HTMLFormElement | null>(null);
   const [composerHeight, setComposerHeight] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const emojiPickerRef = useRef<HTMLDivElement | null>(null);
+  const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const chatEvents = events;
 
@@ -51,6 +79,30 @@ export function RoomChat({
   const typingMembers = useMemo(
     () => members.filter((member) => member.isTyping && member.uid !== currentUserId),
     [members, currentUserId],
+  );
+
+  const updateComposerValue = useCallback(
+    (value: string) => {
+      setMessage(value);
+      const trimmed = value.trim();
+      if (!trimmed) {
+        onTypingChange?.(false);
+        if (typingTimeout.current) {
+          window.clearTimeout(typingTimeout.current);
+          typingTimeout.current = null;
+        }
+        return;
+      }
+      onTypingChange?.(true);
+      if (typingTimeout.current) {
+        window.clearTimeout(typingTimeout.current);
+      }
+      typingTimeout.current = window.setTimeout(() => {
+        onTypingChange?.(false);
+        typingTimeout.current = null;
+      }, 2000);
+    },
+    [onTypingChange],
   );
 
   const handleSubmit = async (event?: React.FormEvent<HTMLFormElement>) => {
@@ -71,6 +123,29 @@ export function RoomChat({
       setSending(false);
     }
   };
+
+  const insertEmoji = useCallback(
+    (emoji: string) => {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        const selectionStart = textarea.selectionStart ?? message.length;
+        const selectionEnd = textarea.selectionEnd ?? message.length;
+        const nextValue = `${message.slice(0, selectionStart)}${emoji}${message.slice(selectionEnd)}`;
+        updateComposerValue(nextValue);
+        requestAnimationFrame(() => {
+          const node = textareaRef.current;
+          if (!node) return;
+          node.focus();
+          const cursor = selectionStart + emoji.length;
+          node.setSelectionRange(cursor, cursor);
+        });
+      } else {
+        updateComposerValue(`${message}${emoji}`);
+      }
+      setShowEmojiPicker(false);
+    },
+    [message, updateComposerValue],
+  );
 
   useLayoutEffect(() => {
     const updateHeight = () => {
@@ -144,12 +219,37 @@ export function RoomChat({
     };
   }, [onTypingChange]);
 
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (
+        emojiPickerRef.current?.contains(target) ||
+        emojiButtonRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setShowEmojiPicker(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showEmojiPicker]);
+
   const isCard = variant === "card";
 
   const outerClasses = clsx(
     "flex min-h-0 w-full flex-col",
     isCard
-      ? "overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950"
+      ? "rounded-3xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950"
       : "flex-1 bg-white dark:bg-slate-900 sm:-mx-4",
     !className && isCard ? DEFAULT_CARD_HEIGHT : null,
     className,
@@ -178,7 +278,7 @@ export function RoomChat({
         </header>
       ) : null}
 
-      <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden">
+      <div className="relative flex flex-1 min-h-0 flex-col overflow-visible">
         <div
           ref={scrollRef}
           className={clsx(
@@ -300,26 +400,10 @@ export function RoomChat({
       >
         <div className="flex items-end gap-2">
           <textarea
+            ref={textareaRef}
             value={message}
             onChange={(event) => {
-              setMessage(event.target.value);
-              const nextValue = event.target.value;
-              if (!nextValue.trim()) {
-                onTypingChange?.(false);
-                if (typingTimeout.current) {
-                  window.clearTimeout(typingTimeout.current);
-                  typingTimeout.current = null;
-                }
-                return;
-              }
-              onTypingChange?.(true);
-              if (typingTimeout.current) {
-                window.clearTimeout(typingTimeout.current);
-              }
-              typingTimeout.current = window.setTimeout(() => {
-                onTypingChange?.(false);
-                typingTimeout.current = null;
-              }, 2000);
+              updateComposerValue(event.target.value);
             }}
             onBlur={() => {
               onTypingChange?.(false);
@@ -343,6 +427,49 @@ export function RoomChat({
                 : "border-gray-200 bg-white shadow-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100",
             )}
           />
+          <div className="relative">
+            <button
+              type="button"
+              ref={emojiButtonRef}
+              onClick={() => setShowEmojiPicker((open) => !open)}
+              aria-label="Insert emoji"
+              aria-expanded={showEmojiPicker}
+              className={clsx(
+                "flex h-9 w-9 items-center justify-center rounded-full border transition focus:outline-none focus:ring-2 focus:ring-blue-500",
+                isCard
+                  ? "border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800"
+                  : "border-gray-200 bg-white hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800",
+              )}
+            >
+              <Smile className="h-5 w-5 text-gray-500 dark:text-gray-300" aria-hidden="true" />
+            </button>
+            {showEmojiPicker ? (
+              <div
+                ref={emojiPickerRef}
+                className="absolute bottom-11 right-0 z-40 w-64 max-h-64 space-y-3 overflow-y-auto rounded-2xl border border-gray-200 bg-white p-3 text-sm shadow-lg dark:border-slate-700 dark:bg-slate-900"
+              >
+                {EMOJI_GROUPS.map((group) => (
+                  <div key={group.label}>
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                      {group.label}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {group.emojis.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          className="flex h-9 w-9 items-center justify-center rounded-xl border border-transparent text-xl transition hover:-translate-y-0.5 hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/10"
+                          onClick={() => insertEmoji(emoji)}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <Button type="submit" variant="primary" size="sm" disabled={!message.trim() || sending}>
             Send
           </Button>
