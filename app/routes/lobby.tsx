@@ -1,7 +1,19 @@
 import type { Route } from "./+types/lobby";
 import { Link } from "react-router";
 import { useMemo, useState } from "react";
-import { Share2 } from "lucide-react";
+import {
+  Activity,
+  Clock,
+  Filter,
+  Loader2,
+  PieChart,
+  Plus,
+  RefreshCw,
+  Search,
+  Share2,
+  Users as UsersIcon,
+} from "lucide-react";
+import clsx from "clsx";
 import { RequireAuth } from "../components/layout/RequireAuth";
 import { Button } from "../components/ui/button";
 import { useRoomsList } from "../hooks/useRoomsList";
@@ -20,17 +32,34 @@ export default function Lobby() {
   const auth = useAuth();
   const currentUser = auth.status === "authenticated" ? auth.user : null;
   const { rooms, loading } = useRoomsList({ viewerUid: currentUser?.uid });
-  const [statusFilter, setStatusFilter] = useState<"all" | "waiting" | "active" | "completed">("all");
-  const [difficultyFilter, setDifficultyFilter] = useState<Difficulty | "all">("all");
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<RoomStatusFilter>("all");
+  const [difficultyFilter, setDifficultyFilter] = useState<RoomDifficultyFilter>("all");
   const [copiedRoomId, setCopiedRoomId] = useState<string | null>(null);
 
+  const trimmedQuery = query.trim().toLowerCase();
   const filteredRooms = useMemo(() => {
     return rooms.filter((room) => {
-      const statusMatches = statusFilter === "all" ? true : room.status === statusFilter;
-      const difficultyMatches = difficultyFilter === "all" ? true : room.difficulty === difficultyFilter;
-      return statusMatches && difficultyMatches;
+      const matchesQuery = !trimmedQuery
+        ? true
+        : `${room.name ?? ""} ${room.id} ${room.ownerName ?? ""}`.toLowerCase().includes(trimmedQuery);
+      const matchesStatus = statusFilter === "all" ? true : room.status === statusFilter;
+      const matchesDifficulty = difficultyFilter === "all" ? true : room.difficulty === difficultyFilter;
+      return matchesQuery && matchesStatus && matchesDifficulty;
     });
-  }, [rooms, statusFilter, difficultyFilter]);
+  }, [rooms, trimmedQuery, statusFilter, difficultyFilter]);
+
+  const stats = useMemo(() => {
+    const waitingRooms = filteredRooms.filter((room) => room.status === "waiting").length;
+    const activeRooms = filteredRooms.filter((room) => room.status === "active").length;
+    const completedRooms = filteredRooms.filter((room) => room.status === "completed").length;
+    const uniqueHosts = new Set(filteredRooms.map((room) => room.ownerUid)).size;
+    const averageParticipants =
+      filteredRooms.length === 0
+        ? 0
+        : filteredRooms.reduce((sum, room) => sum + (room.allowedUids?.length ?? 0), 0) / filteredRooms.length;
+    return { waitingRooms, activeRooms, completedRooms, uniqueHosts, averageParticipants };
+  }, [filteredRooms]);
 
   const handleCopy = async (roomId: string) => {
     const link =
@@ -47,127 +76,259 @@ export default function Lobby() {
   return (
     <RequireAuth>
       <div className="space-y-10">
-        <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">Game lobby</h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              Join an open table or spin up a fresh puzzle with your favorite difficulty.
+        <header className="grid gap-4 rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 lg:grid-cols-[1.7fr_1fr] lg:items-center">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-semibold tracking-tight text-gray-900 dark:text-gray-100">Game lobby</h1>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Jump into a live Sudoku session or host your own table in seconds.
             </p>
+            <dl className="flex flex-wrap gap-4 text-sm text-gray-500 dark:text-gray-400">
+              <div className="flex items-center gap-2">
+                <UsersIcon className="h-4 w-4 text-blue-500" aria-hidden="true" />
+                <span>{filteredRooms.length} public room{filteredRooms.length === 1 ? "" : "s"}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-emerald-500" aria-hidden="true" />
+                <span>{stats.activeRooms} active match{stats.activeRooms === 1 ? "" : "es"}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <PieChart className="h-4 w-4 text-purple-500" aria-hidden="true" />
+                <span>{stats.waitingRooms} waiting for players</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Activity className="h-4 w-4 text-amber-500" aria-hidden="true" />
+                <span>Avg {stats.averageParticipants.toFixed(1)} players per room</span>
+              </div>
+            </dl>
           </div>
-          <Button size="lg" asChild>
-            <Link to="/rooms/new">Create room</Link>
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <Button variant="outline" size="sm" icon={<RefreshCw className="h-4 w-4" aria-hidden="true" />}>
+              Refresh
+            </Button>
+            <Button asChild size="sm" icon={<Plus className="h-4 w-4" aria-hidden="true" />}>
+              <Link to="/rooms/new">Create room</Link>
+            </Button>
+          </div>
         </header>
 
-        <section className="flex flex-col gap-4 rounded-3xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-950 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              Status
-            </span>
-            {statusFilters.map((option) => (
-              <Button
-                key={option.value}
-                variant={statusFilter === option.value ? "primary" : "outline"}
-                size="sm"
-                onClick={() => setStatusFilter(option.value)}
-              >
-                {option.label}
-              </Button>
-            ))}
+        <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="relative w-full max-w-sm">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search rooms or hosts…"
+                className="w-full rounded-full border border-gray-300 bg-gray-50 py-2 pl-9 pr-4 text-sm text-gray-700 outline-none transition hover:border-blue-300 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-200 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:hover:border-blue-500/30 dark:focus:border-blue-500 dark:focus:ring-blue-400/30"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-100 px-2 py-1 text-xs text-gray-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                <Filter className="h-3.5 w-3.5" aria-hidden="true" />
+                Filters
+              </span>
+              <FilterGroup
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={STATUS_FILTERS}
+              />
+              <FilterGroup
+                value={difficultyFilter}
+                onChange={setDifficultyFilter}
+                options={DIFFICULTY_FILTERS}
+              />
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              Difficulty
-            </span>
-            {difficultyFilters.map((option) => (
-              <Button
-                key={option.value}
-                variant={difficultyFilter === option.value ? "primary" : "outline"}
-                size="sm"
-                onClick={() => setDifficultyFilter(option.value)}
-              >
-                {option.label}
-              </Button>
-            ))}
-          </div>
-        </section>
+        </div>
 
         {loading ? (
-          <div className="flex min-h-[30vh] items-center justify-center">
-            <div className="h-10 w-10 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+          <div className="flex min-h-[40vh] items-center justify-center">
+            <Loader2 className="h-10 w-10 animate-spin text-blue-500" aria-hidden="true" />
           </div>
         ) : rooms.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-gray-300 bg-white/40 p-10 text-center dark:border-gray-700 dark:bg-gray-900/40">
-            <h2 className="text-xl font-semibold">It&apos;s quiet... for now.</h2>
-            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-              Be the first to create a room and invite someone special.
-            </p>
-          </div>
+          <EmptyState variant="empty" />
         ) : filteredRooms.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-gray-300 bg-white/40 p-10 text-center dark:border-gray-700 dark:bg-gray-900/40">
-            <h2 className="text-xl font-semibold">No rooms match your filters.</h2>
-            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Try adjusting status or difficulty.</p>
-          </div>
+          <EmptyState variant="filtered" />
         ) : (
-          <div className="grid gap-6 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filteredRooms.map((room) => (
-              <article
+              <RoomCard
                 key={room.id}
-                className="flex flex-col justify-between rounded-3xl border border-gray-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-gray-800 dark:bg-gray-900"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-semibold">{room.name || "Untitled room"}</h2>
-                    <span className="rounded-full bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">
-                      {room.difficulty}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Avatar
-                      src={room.ownerPhotoURL ?? undefined}
-                      name={room.ownerName || truncateId(room.ownerUid)}
-                      size="sm"
-                      fallbackColor={room.ownerColor ?? "#6366f1"}
-                      className="shadow ring-2 ring-white dark:ring-slate-900"
-                    />
-                    <div className="flex flex-col text-sm text-gray-600 dark:text-gray-300">
-                      <span className="font-semibold text-gray-800 dark:text-gray-100">
-                        {room.ownerUid === currentUser?.uid
-                          ? "You"
-                          : room.ownerName || truncateId(room.ownerUid)}
-                      </span>
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
-                        Updated {formatRelativeTime(room.updatedAt?.toDate() ?? new Date())}
-                      </span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-500">
-                    Room code: {room.id.slice(0, 6).toUpperCase()}
-                  </p>
-                  <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                    Status: {room.status}
-                  </p>
-                </div>
-                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                  <Button asChild className="flex-1 justify-center">
-                    <Link to={`/room/${room.id}`}>Join room</Link>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="flex items-center justify-center gap-2"
-                    onClick={() => handleCopy(room.id)}
-                  >
-                    <Share2 className="h-4 w-4" aria-hidden="true" />
-                    {copiedRoomId === room.id ? "Copied" : "Copy link"}
-                  </Button>
-                </div>
-              </article>
+                room={room}
+                onCopy={handleCopy}
+                copied={copiedRoomId === room.id}
+                isOwnRoom={room.ownerUid === currentUser?.uid}
+              />
             ))}
           </div>
         )}
       </div>
     </RequireAuth>
+  );
+}
+
+type RoomStatusFilter = "all" | "waiting" | "active" | "completed";
+type RoomDifficultyFilter = "all" | Difficulty;
+
+const STATUS_FILTERS: Array<{ label: string; value: RoomStatusFilter }> = [
+  { label: "All", value: "all" },
+  { label: "Waiting", value: "waiting" },
+  { label: "Active", value: "active" },
+  { label: "Completed", value: "completed" },
+];
+
+const DIFFICULTY_FILTERS: Array<{ label: string; value: RoomDifficultyFilter }> = [
+  { label: "All", value: "all" },
+  { label: "Easy", value: "easy" },
+  { label: "Medium", value: "medium" },
+  { label: "Hard", value: "hard" },
+  { label: "Expert", value: "expert" },
+];
+
+function FilterGroup<T extends RoomStatusFilter | RoomDifficultyFilter>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (value: T) => void;
+  options: Array<{ label: string; value: T }>;
+}) {
+  return (
+    <div className="flex gap-2">
+      {options.map((option) => {
+        const isActive = value === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            className={clsx(
+              "rounded-full border px-3 py-1 text-xs font-medium transition",
+              isActive
+                ? "border-blue-500 bg-blue-500/10 text-blue-600 dark:border-blue-400 dark:bg-blue-400/10 dark:text-blue-200"
+                : "border-transparent bg-gray-100 text-gray-600 hover:border-blue-300 hover:text-blue-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500/40 dark:hover:text-blue-300",
+            )}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+type RoomCardProps = {
+  room: ReturnType<typeof useRoomsList>["rooms"][number];
+  onCopy: (roomId: string) => void;
+  copied: boolean;
+  isOwnRoom: boolean;
+};
+
+function RoomCard({ room, onCopy, copied, isOwnRoom }: RoomCardProps) {
+  return (
+    <div className="group flex flex-col justify-between rounded-3xl border border-gray-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-blue-400/60 hover:shadow-lg dark:border-gray-800 dark:bg-gray-900 dark:hover:border-blue-400/30">
+      <div className="flex items-start gap-3">
+        <Avatar
+          src={room.ownerPhotoURL ?? undefined}
+          name={room.ownerName || room.ownerUid}
+          size="sm"
+          fallbackColor={room.ownerColor ?? "#6366f1"}
+          className="shadow ring-2 ring-white dark:ring-slate-900"
+        />
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex items-center gap-2">
+            <h2 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
+              {room.name || "Untitled room"}
+            </h2>
+            <StatusBadge status={room.status} />
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Host: {isOwnRoom ? "You" : room.ownerName ?? truncateId(room.ownerUid)}</p>
+          <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <div className="flex items-center gap-2 rounded-2xl bg-blue-500/10 px-3 py-2 text-blue-600 dark:bg-blue-500/10 dark:text-blue-200">
+              <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+              <span className="capitalize">{room.difficulty}</span>
+            </div>
+            <div className="flex items-center gap-2 rounded-2xl bg-gray-100 px-3 py-2 dark:bg-gray-800">
+              <UsersIcon className="h-4 w-4 text-gray-500 dark:text-gray-300" aria-hidden="true" />
+              <span>{room.allowedUids?.length ?? 0} players</span>
+            </div>
+            <div className="col-span-2 flex items-center gap-2 rounded-2xl bg-gray-100 px-3 py-2 text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+              <Clock className="h-4 w-4" aria-hidden="true" />
+              <span>Updated {formatRelativeTime(room.updatedAt?.toDate() ?? new Date())}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+          <Share2 className="h-3.5 w-3.5 text-blue-500" aria-hidden="true" />
+          <span className="truncate">{room.id}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button asChild size="sm">
+            <Link to={`/room/${room.id}`}>Join</Link>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onCopy(room.id)}
+            className="flex items-center gap-1 text-xs"
+          >
+            <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+            {copied ? "Copied!" : "Copy"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: ReturnType<typeof useRoomsList>["rooms"][number]["status"] }) {
+  const tone =
+    status === "active"
+      ? "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-200"
+      : status === "completed"
+        ? "bg-purple-500/15 text-purple-600 dark:bg-purple-400/10 dark:text-purple-200"
+        : "bg-amber-500/15 text-amber-600 dark:bg-amber-400/10 dark:text-amber-200";
+
+  return (
+    <span className={clsx("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide", tone)}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+      {status}
+    </span>
+  );
+}
+
+function EmptyState({ variant }: { variant: "empty" | "filtered" }) {
+  if (variant === "filtered") {
+    return (
+      <div className="rounded-3xl border border-dashed border-gray-300 bg-gradient-to-br from-white via-gray-50 to-gray-100 p-12 text-center dark:border-gray-700 dark:from-slate-950 dark:via-slate-950/60 dark:to-slate-900">
+        <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">No rooms match your filters</h2>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Adjust the status or difficulty to explore more rooms.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-3xl border border-dashed border-gray-300 bg-gradient-to-br from-white via-gray-50 to-gray-100 p-12 text-center dark:border-gray-700 dark:from-slate-950 dark:via-slate-950/60 dark:to-slate-900">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-blue-500/10 text-blue-600 dark:bg-blue-500/15 dark:text-blue-200">
+        <Plus className="h-7 w-7" aria-hidden="true" />
+      </div>
+      <h2 className="mt-6 text-2xl font-semibold text-gray-900 dark:text-gray-100">It&apos;s quiet… for now</h2>
+      <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+        Be the first to create a room and invite someone special to play.
+      </p>
+      <div className="mt-6 flex justify-center gap-3">
+        <Button asChild icon={<Plus className="h-4 w-4" aria-hidden="true" />}>
+          <Link to="/rooms/new">Create a room</Link>
+        </Button>
+        <Button asChild variant="outline" icon={<RefreshCw className="h-4 w-4" aria-hidden="true" />}>
+          <Link to=".">Refresh</Link>
+        </Button>
+      </div>
+    </div>
   );
 }
 
